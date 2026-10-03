@@ -70,6 +70,36 @@ export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
   const [expiryHours, setExpiryHours] = useState<number>(24);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Real Destination Search (OpenStreetMap Nominatim API)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<Destination[]>([]);
+
+  const handleSearchDestination = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          searchQuery
+        )}&limit=5`,
+        { headers: { 'User-Agent': 'SyncPoint-Production/1.0' } }
+      );
+      const data = await res.json();
+      const mapped: Destination[] = data.map((item: any) => ({
+        displayName: item.display_name.split(',')[0],
+        address: item.display_name,
+        lat: parseFloat(item.lat),
+        lng: parseFloat(item.lon),
+      }));
+      setSearchResults(mapped);
+    } catch (e: any) {
+      Alert.alert('Search Notice', 'Could not fetch online places. You can pick from presets below.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!profile || !profile.uid) {
       Alert.alert('Profile Needed', 'Please complete your traveler profile before creating a journey.');
@@ -131,6 +161,51 @@ export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
       <View style={styles.section}>
         <Text style={styles.label}>Shared Common Destination</Text>
         <Text style={styles.helperText}>All participants will navigate toward this sync point.</Text>
+
+        {/* Live Search Bar */}
+        <View style={styles.searchBarRow}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search any city, landmark, or address..."
+            placeholderTextColor="#64748b"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={handleSearchDestination}
+          />
+          <TouchableOpacity
+            style={styles.searchButton}
+            onPress={handleSearchDestination}
+            disabled={isSearching}
+          >
+            {isSearching ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Text style={styles.searchButtonText}>Search</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Search Results */}
+        {searchResults.length > 0 && (
+          <View style={styles.resultsContainer}>
+            <Text style={styles.subLabel}>Search Results:</Text>
+            {searchResults.map((dest, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[
+                  styles.optionCard,
+                  selectedDestination.displayName === dest.displayName && styles.optionCardSelected,
+                ]}
+                onPress={() => setSelectedDestination(dest)}
+              >
+                <Text style={styles.optionTitle}>{dest.displayName}</Text>
+                <Text style={styles.optionSubtitle}>{dest.address}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        <Text style={styles.subLabel}>Popular Presets:</Text>
         {PRESET_DESTINATIONS.map((dest, idx) => (
           <TouchableOpacity
             key={idx}
@@ -280,6 +355,46 @@ const styles = StyleSheet.create({
     fontSize: 15,
     borderWidth: 1,
     borderColor: '#1e293b',
+  },
+  searchBarRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: '#111827',
+    color: '#f8fafc',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  searchButton: {
+    backgroundColor: '#06b6d4',
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  subLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  resultsContainer: {
+    marginBottom: 12,
   },
   optionCard: {
     backgroundColor: '#111827',

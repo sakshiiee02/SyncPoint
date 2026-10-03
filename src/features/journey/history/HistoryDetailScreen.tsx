@@ -19,75 +19,6 @@ interface HistoryDetailScreenProps {
   onClose: () => void;
 }
 
-// Sample fallback for demonstration when opening demo journeys from home screen
-const DEMO_HISTORY_SNAPSHOT: JourneyHistorySnapshot = {
-  journeyId: 'journey_demo_goa',
-  name: 'Goa Coastal Road Trip',
-  destination: {
-    lat: 15.3808,
-    lng: 73.8314,
-    displayName: 'Goa Dabolim Airport',
-  },
-  createdAt: Date.now() - 3600000 * 8,
-  completedAt: Date.now() - 3600000 * 1,
-  status: 'COMPLETED',
-  travelers: {
-    uid_aarav: {
-      uid: 'uid_aarav',
-      name: 'Aarav Sharma',
-      travelMode: 'CAR',
-      startedAt: Date.now() - 3600000 * 8,
-      finishedAt: Date.now() - 3600000 * 1,
-      totalDistanceM: 582400,
-      durationS: 25200,
-      avgSpeedKmh: 83.2,
-      maxSpeedKmh: 118.5,
-      compressedPolyline: [
-        [77.209, 28.6139],
-        [76.85, 27.55],
-        [75.82, 26.92],
-        [74.63, 24.88],
-        [73.8314, 15.3808],
-      ],
-      pointsSampleCount: 1420,
-    },
-    uid_priya: {
-      uid: 'uid_priya',
-      name: 'Priya Patel',
-      travelMode: 'CAR',
-      startedAt: Date.now() - 3600000 * 7,
-      finishedAt: Date.now() - 3600000 * 2,
-      totalDistanceM: 421000,
-      durationS: 18000,
-      avgSpeedKmh: 84.2,
-      maxSpeedKmh: 112.0,
-      compressedPolyline: [
-        [72.8777, 19.076],
-        [73.18, 18.52],
-        [73.8314, 15.3808],
-      ],
-      pointsSampleCount: 980,
-    },
-    uid_rohan: {
-      uid: 'uid_rohan',
-      name: 'Rohan Verma',
-      travelMode: 'BIKE',
-      startedAt: Date.now() - 3600000 * 6,
-      finishedAt: Date.now() - 3600000 * 1,
-      totalDistanceM: 260000,
-      durationS: 18000,
-      avgSpeedKmh: 52.0,
-      maxSpeedKmh: 86.4,
-      compressedPolyline: [
-        [74.12, 16.7],
-        [74.22, 16.1],
-        [73.8314, 15.3808],
-      ],
-      pointsSampleCount: 650,
-    },
-  },
-};
-
 export const HistoryDetailScreen: React.FC<HistoryDetailScreenProps> = ({
   journeyId,
   onClose,
@@ -108,13 +39,10 @@ export const HistoryDetailScreen: React.FC<HistoryDetailScreenProps> = ({
           const firstUid = Object.keys(data.travelers)[0];
           setSelectedTravelerUid(firstUid);
         } else {
-          // Use sample demo history snapshot
-          setHistory(DEMO_HISTORY_SNAPSHOT);
-          setSelectedTravelerUid('uid_aarav');
+          setHistory(null);
         }
       } catch (e) {
-        setHistory(DEMO_HISTORY_SNAPSHOT);
-        setSelectedTravelerUid('uid_aarav');
+        setHistory(null);
       } finally {
         setIsLoading(false);
       }

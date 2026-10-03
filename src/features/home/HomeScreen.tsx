@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useProfileStore } from '@/store/useProfileStore';
+import { listRecentJourneys } from '@/services/firebase/historyService';
+import { RecentJourneySummary } from '@/types/history';
 
 interface HomeScreenProps {
   onCreateJourney: () => void;
@@ -27,6 +29,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const { currentJourney, members } = useJourneyStore();
   const { profile } = useProfileStore();
+  const [recentTrips, setRecentTrips] = useState<RecentJourneySummary[]>([]);
+
+  useEffect(() => {
+    async function loadRecent() {
+      try {
+        const trips = await listRecentJourneys();
+        setRecentTrips(trips);
+      } catch (e) {
+        setRecentTrips([]);
+      }
+    }
+    loadRecent();
+  }, []);
 
   const activeMembersCount = Object.values(members).filter(
     (m) => m.sharingState === 'ACTIVE'
@@ -100,31 +115,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Recent Journeys History (Section 6.3) */}
+        {/* Recent Journeys History (Section 6.3 - Real Data) */}
         <View style={styles.recentSection}>
           <Text style={styles.recentHeader}>Recent Trips (Indefinite History)</Text>
-          <TouchableOpacity
-            style={styles.recentItem}
-            activeOpacity={0.7}
-            onPress={() => onOpenHistory && onOpenHistory('journey_demo_goa')}
-          >
-            <View>
-              <Text style={styles.recentTitle}>Goa Coastal Road Trip</Text>
-              <Text style={styles.recentSubtitle}>Dabolim Airport • Completed • 3 Travelers</Text>
+          {recentTrips.length === 0 ? (
+            <View style={styles.emptyRecentBox}>
+              <Text style={styles.emptyRecentText}>
+                No completed road trips yet. When journeys reach their destination, they are preserved here indefinitely for route replay.
+              </Text>
             </View>
-            <Text style={styles.recentDate}>Replay ➔</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.recentItem}
-            activeOpacity={0.7}
-            onPress={() => onOpenHistory && onOpenHistory('journey_demo_jaipur')}
-          >
-            <View>
-              <Text style={styles.recentTitle}>Jaipur Highway Convoy</Text>
-              <Text style={styles.recentSubtitle}>Amber Fort • Completed • 2 Travelers</Text>
-            </View>
-            <Text style={styles.recentDate}>Replay ➔</Text>
-          </TouchableOpacity>
+          ) : (
+            recentTrips.map((trip) => (
+              <TouchableOpacity
+                key={trip.journeyId}
+                style={styles.recentItem}
+                activeOpacity={0.7}
+                onPress={() => onOpenHistory && onOpenHistory(trip.journeyId)}
+              >
+                <View>
+                  <Text style={styles.recentTitle}>{trip.name}</Text>
+                  <Text style={styles.recentSubtitle}>
+                    {trip.destinationName} • {trip.status} • {trip.totalTravelers} Travelers
+                  </Text>
+                </View>
+                <Text style={styles.recentDate}>Replay ➔</Text>
+              </TouchableOpacity>
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -320,4 +337,17 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontWeight: '500',
   },
+  emptyRecentBox: {
+    backgroundColor: '#111827',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  emptyRecentText: {
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
+  },
 });
+
