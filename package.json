@@ -5,13 +5,13 @@
   "private": true,
   "main": "src/index.ts",
   "scripts": {
+    "dev": "vite --port 5173 --host",
     "start": "react-native start",
     "android": "react-native run-android",
     "test": "node --test tests/unit/geoMath.test.mjs tests/unit/journeyLifecycle.test.mjs tests/unit/liveMapSurface.test.mjs tests/unit/adaptiveSampling.test.mjs tests/unit/movementSimulator.test.mjs tests/unit/routingAndNavigation.test.mjs tests/unit/offlineAndSync.test.mjs tests/unit/coordinationAndSafety.test.mjs tests/unit/historyAndSecurity.test.mjs tests/simulation/MultiTravelerSimulator.test.mjs",
     "test:sim": "node --test tests/simulation/MultiTravelerSimulator.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src/"
-
   },
   "dependencies": {
     "@maplibre/maplibre-react-native": "^10.0.0",
@@ -30,7 +30,8 @@
   "devDependencies": {
     "@types/node": "^22.13.9",
     "@types/react": "^19.0.10",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vite": "^8.3.2"
   },
   "keywords": [
     "realtime-tracking",

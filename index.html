@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SyncPoint • Real-Time Desktop Group Journey Tracking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/web/style.css">
+</head>
+<body>
+  <div id="app" class="app-root">
+    <!-- Top Global Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <span class="logo-radar"></span>
+          <span class="logo-text">SyncPoint</span>
+        </div>
+        <div class="journey-pill" id="journeyStatusPill">
+          <span class="pulse-indicator"></span>
+          <span class="journey-title" id="journeyTitle">Goa Coastal Convoy</span>
+          <span class="badge-code" id="journeyCodeBadge">#GOA42K</span>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <!-- Turn Maneuver Banner (Section 6.4 & 11.2) -->
+        <div class="nav-banner" id="navBanner">
+          <div class="maneuver-icon" id="maneuverIcon">↗️</div>
+          <div class="maneuver-text-box">
+            <div class="maneuver-dist" id="maneuverDist">In 650m</div>
+            <div class="maneuver-instr" id="maneuverInstr">Take right exit toward NH 66 Expressway</div>
+          </div>
+          <div class="voice-badge" id="voiceIndicator" title="Voice Guidance Active">🔊 TTS Active</div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Sim speed & quick toggles -->
+        <div class="sim-speed-controls">
+          <button id="btnPlayPause" class="btn-icon" title="Play/Pause Simulation">⏸</button>
+          <button id="btnSpeed1x" class="btn-speed active" data-speed="1">1x</button>
+          <button id="btnSpeed5x" class="btn-speed" data-speed="5">5x</button>
+          <button id="btnSpeed20x" class="btn-speed" data-speed="20">20x</button>
+        </div>
+
+        <button id="btnEmergencyTrigger" class="btn-emergency" title="Emergency Assistance">
+          🚨 SOS Help
+        </button>
+
+        <button id="btnToggleChat" class="btn-chat" title="Convoy Group Chat">
+          💬 Chat <span class="badge-count" id="chatUnreadBadge">2</span>
+        </button>
+
+        <button id="btnToggleHistory" class="btn-secondary" title="Trip History & Replay">
+          📜 History
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="workspace-body">
+      <!-- Left / Center: Interactive Map Surface -->
+      <main class="map-viewport">
+        <canvas id="mapCanvas"></canvas>
+
+        <!-- Floating Map Overlay Controls -->
+        <div class="map-overlay-top">
+          <!-- Quick Status Bar (Section 14.2) -->
+          <div class="quick-status-bar" id="quickStatusBar">
+            <button class="status-chip active" data-status="ON_THE_WAY">🚗 On the way</button>
+            <button class="status-chip" data-status="FUEL_STOP">⛽ Fuel Stop</button>
+            <button class="status-chip" data-status="FOOD_STOP">🍔 Food Stop</button>
+            <button class="status-chip" data-status="BREAK">☕ Break</button>
+            <button class="status-chip" data-status="TRAFFIC">🚦 Heavy Traffic</button>
+            <button class="status-chip chip-sos" data-status="NEED_HELP">🆘 Need Help</button>
+          </div>
+        </div>
+
+        <!-- Floating Map Controls (Zoom, Recenter, Overview) -->
+        <div class="map-camera-controls">
+          <button id="btnRecenterMe" class="btn-cam-control active" title="Follow My Vehicle">🎯 Recenter Me</button>
+          <button id="btnOverviewMode" class="btn-cam-control" title="Fit All 10 Convoy Members">🌐 Convoy Overview</button>
+          <button id="btnToggleOfflineMode" class="btn-cam-control" title="Simulate Offline Cellular Loss">📶 Online (Sync)</button>
+        </div>
+
+        <!-- Traveler Detail Floating Card (Section 6.5 & 11.3) -->
+        <div class="traveler-floating-card hidden" id="travelerFloatingCard">
+          <button class="card-close" id="btnCloseTravelerCard">✕</button>
+          <div class="card-header">
+            <div class="avatar-circle" id="cardAvatar">A</div>
+            <div>
+              <h3 id="cardName">Aarav Sharma</h3>
+              <p class="card-sub" id="cardOrigin">From Delhi • Driving Car</p>
+            </div>
+            <span class="status-pill-card" id="cardStatusPill">ON THE WAY</span>
+          </div>
+          <div class="card-metrics-grid">
+            <div class="metric-item">
+              <span class="metric-label">SPEED</span>
+              <span class="metric-val" id="cardSpeed">84 km/h</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">DISTANCE</span>
+              <span class="metric-val" id="cardDistance">142 km</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">ETA</span>
+              <span class="metric-val" id="cardEta">1h 48m</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">BATTERY</span>
+              <span class="metric-val" id="cardBattery">88%</span>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button id="btnNavigateToTraveler" class="btn-nav-traveler">🧭 Navigate to Aarav</button>
+            <button id="btnCallTraveler" class="btn-call-traveler">📞 Call</button>
+          </div>
+        </div>
+
+        <!-- Secondary Route Banner (Section 11.3) -->
+        <div class="secondary-route-banner hidden" id="secondaryRouteBanner">
+          <div class="secondary-info">
+            <span class="secondary-tag">SECONDARY ROUTE</span>
+            <span class="secondary-desc">Temporary route to <strong id="secondaryTargetName">Priya</strong> (Destination preserved: Goa Airport)</span>
+          </div>
+          <button id="btnExitSecondaryRoute" class="btn-exit-secondary">Exit Route</button>
+        </div>
+      </main>
+
+      <!-- Right Panel: Convoy Roster & Live Telemetry -->
+      <aside class="convoy-sidebar" id="convoySidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-title-row">
+            <h2>Convoy Travelers</h2>
+            <span class="badge-total" id="memberCountBadge">10 / 10 Active</span>
+          </div>
+          <p class="destination-sub">Destination: <strong>Goa Dabolim Airport</strong> (120m arrival zone)</p>
+        </div>
+
+        <div class="travelers-list" id="travelersList">
+          <!-- Populated dynamically via app.js -->
+        </div>
+
+        <!-- Bottom Sharing Controls -->
+        <div class="sidebar-footer">
+          <button id="btnTogglePauseSharing" class="btn-pause-sharing">
+            ⏸ Pause My Location
+          </button>
+          <button id="btnFinishJourney" class="btn-finish-journey">
+            🏁 Finish Journey
+          </button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Slide-over Drawer: Group Chat (Section 14.1) -->
+    <div class="drawer-overlay hidden" id="chatDrawerOverlay">
+      <div class="drawer-panel chat-drawer">
+        <div class="drawer-header">
+          <div>
+            <h3>Convoy Chat</h3>
+            <p class="drawer-sub">Goa Coastal Convoy • Encrypted to 10 members</p>
+          </div>
+          <button id="btnCloseChatDrawer" class="btn-icon">✕</button>
+        </div>
+        <div class="chat-messages-container" id="chatMessagesList">
+          <!-- Dynamic chat messages -->
+        </div>
+        <div class="chat-input-bar">
+          <input type="text" id="chatInput" placeholder="Message your convoy..." autocomplete="off">
+          <button id="btnSendChat" class="btn-primary">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Emergency Assistance Action Sheet (Section 14.3) -->
+    <div class="modal-overlay hidden" id="emergencyModalOverlay">
+      <div class="modal-box emergency-box">
+        <div class="emergency-header">
+          <span class="emergency-icon-pulse">🚨</span>
+          <div>
+            <h2>Convoy Emergency Assistance</h2>
+            <p class="emergency-sub">Immediate alert broadcast and emergency services</p>
+          </div>
+        </div>
+
+        <div class="emergency-location-box">
+          <div class="loc-tag">YOUR CURRENT POSITION</div>
+          <div class="loc-road" id="emergencyRoad">NH 66 Highway (Near Kankavli)</div>
+          <div class="loc-coords" id="emergencyCoords">15.98124° N, 73.71241° E</div>
+        </div>
+
+        <div class="emergency-actions-stack">
+          <button id="btnBroadcastEmergency" class="btn-action-urgent">
+            📢 Broadcast "Need Help" Alert to Convoy
+          </button>
+          <button id="btnCall112" class="btn-action-sos">
+            📞 Call Emergency Services (112 / 108)
+          </button>
+          <button id="btnShareGpsLink" class="btn-action-share">
+            📍 Copy Live GPS Emergency Link
+          </button>
+        </div>
+
+        <div class="emergency-disclaimer">
+          ⚠️ Convenient convoy alert tool only. In case of serious accidents or medical emergencies, dial 112 immediately.
+        </div>
+
+        <button id="btnCloseEmergencyModal" class="btn-modal-cancel">Cancel / Close</button>
+      </div>
+    </div>
+
+    <!-- Modal: Journey History & Replay (Section 13) -->
+    <div class="modal-overlay hidden" id="historyModalOverlay">
+      <div class="modal-box history-box">
+        <div class="modal-header">
+          <div>
+            <h2>Indefinite Journey History & Replay</h2>
+            <p class="modal-sub">Goa Coastal Road Trip • 10 Travelers • Completed</p>
+          </div>
+          <button id="btnCloseHistoryModal" class="btn-icon">✕</button>
+        </div>
+
+        <div class="history-scrubber-area">
+          <div class="scrubber-header">
+            <span>Route Timeline Scrubber</span>
+            <span id="historyScrubberPercent">Progress: 100% (Completed)</span>
+          </div>
+          <input type="range" id="historySlider" min="0" max="100" value="100" class="history-range">
+          <div class="scrubber-btns">
+            <button id="btnPlayHistoryReplay" class="btn-secondary">▶ Play Replay</button>
+            <button id="btnResetHistoryReplay" class="btn-secondary">⏮ Reset</button>
+          </div>
+        </div>
+
+        <div class="history-stats-grid" id="historyStatsGrid">
+          <div class="stat-card">
+            <span class="stat-label">TOTAL CONVOY DISTANCE</span>
+            <span class="stat-val">4,280 km</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">PEAK SPEED</span>
+            <span class="stat-val">118.5 km/h</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">COMPRESSION EFFICIENCY</span>
+            <span class="stat-val">87.4%</span>
+            <span class="stat-sub">12,400 raw GPS fixes &rarr; 1,560 vertices</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">RETENTION</span>
+            <span class="stat-val">Indefinite</span>
+            <span class="stat-sub">Persistent in /journeys/{id}/history</span>
+          </div>
+        </div>
+
+        <div class="history-table-container">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Traveler</th>
+                <th>Mode</th>
+                <th>Origin</th>
+                <th>Distance</th>
+                <th>Avg Speed</th>
+                <th>Arrival Status</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/web/app.js"></script>
+</body>
+</html>
