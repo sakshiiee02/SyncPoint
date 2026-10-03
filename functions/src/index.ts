@@ -7,4 +7,5 @@ import * as admin from 'firebase-admin';
 
 admin.initializeApp();
 
-export const apiVersion = '1.0.0';
+export { createJourney } from './createJourney';
+export { joinJourney } from './joinJourney';
