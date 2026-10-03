@@ -10,4 +10,6 @@ admin.initializeApp();
 export { createJourney } from './createJourney';
 export { joinJourney } from './joinJourney';
 export { pushJourneyEvent } from './pushJourneyEvent';
+export { expireJourney } from './expireJourney';
+
 

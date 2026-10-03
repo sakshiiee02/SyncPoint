@@ -11,6 +11,7 @@ import { OriginTravelModeScreen } from '@/features/journey/join/OriginTravelMode
 import { JourneyLobbyScreen } from '@/features/journey/lobby/JourneyLobbyScreen';
 import { ActiveJourneyScreen } from '@/features/journey/active/ActiveJourneyScreen';
 import { JourneyChatScreen } from '@/features/journey/chat/JourneyChatScreen';
+import { HistoryDetailScreen } from '@/features/journey/history/HistoryDetailScreen';
 import { JourneyMeta } from '@/types/journey';
 
 type ScreenName =
@@ -21,12 +22,14 @@ type ScreenName =
   | 'OriginTravelMode'
   | 'JourneyLobby'
   | 'ActiveJourney'
-  | 'JourneyChat';
+  | 'JourneyChat'
+  | 'HistoryDetail';
 
 export const RootNavigator: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('Home');
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [pendingJoinJourney, setPendingJoinJourney] = useState<JourneyMeta | null>(null);
+  const [selectedHistoryJourneyId, setSelectedHistoryJourneyId] = useState<string | null>(null);
 
   const { hasCompletedProfile, setUid } = useProfileStore();
   const { currentJourney, activeJoinCode } = useJourneyStore();
@@ -137,6 +140,14 @@ export const RootNavigator: React.FC = () => {
         />
       );
 
+    case 'HistoryDetail':
+      return (
+        <HistoryDetailScreen
+          journeyId={selectedHistoryJourneyId || 'journey_demo_goa'}
+          onClose={() => setCurrentScreen('Home')}
+        />
+      );
+
     case 'Home':
     default:
       return (
@@ -145,6 +156,10 @@ export const RootNavigator: React.FC = () => {
           onJoinJourney={() => setCurrentScreen('JoinJourney')}
           onOpenJourney={(_journeyId) => setCurrentScreen('ActiveJourney')}
           onOpenProfile={() => setCurrentScreen('Profile')}
+          onOpenHistory={(journeyId) => {
+            setSelectedHistoryJourneyId(journeyId);
+            setCurrentScreen('HistoryDetail');
+          }}
         />
       );
   }

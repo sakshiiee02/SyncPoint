@@ -33,6 +33,8 @@ import { broadcastQuickStatus } from '@/services/firebase/statusService';
 import { QuickStatusType } from '@/types/status';
 import { ParticipantLiveState, LiveLocationRecord } from '@/types/liveLocation';
 import { isWithinRadius, calculateDistanceMeters, formatDistance } from '@/utils/geoMath';
+import { computeTravelerSummary } from '@/utils/historyCompression';
+import { saveParticipantHistory } from '@/services/firebase/historyService';
 import { CONFIG } from '@/constants/config';
 
 interface ActiveJourneyScreenProps {
@@ -345,12 +347,39 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     }
   };
 
-  // 8. Handle Finish Journey (Section 5.6)
+  // 8. Handle Finish Journey (Section 5.6 & 13)
   const handleFinishJourney = async () => {
     await LocationBridge.finishTracking();
     resetNavigation();
-    if (profile?.uid) {
+    if (profile?.uid && localParticipant) {
       updateMemberSharingState(profile.uid, 'FINISHED');
+      const myMember = members[profile.uid];
+      const summary = computeTravelerSummary(
+        [
+          {
+            lat: myMember?.origin?.lat || localParticipant.lat,
+            lng: myMember?.origin?.lng || localParticipant.lng,
+            timestamp: myMember?.startedAt || Date.now() - 3600000,
+            speedMps: localParticipant.speedMps,
+          },
+          {
+            lat: localParticipant.lat,
+            lng: localParticipant.lng,
+            timestamp: Date.now(),
+            speedMps: 0,
+          },
+        ],
+        {
+          uid: profile.uid,
+          name: profile.name || 'Traveler',
+          travelMode: myMember?.travelMode || 'CAR',
+          startedAt: myMember?.startedAt || Date.now() - 3600000,
+          finishedAt: Date.now(),
+        }
+      );
+      saveParticipantHistory(journeyId, summary).catch((err) => {
+        console.warn('Failed to save participant history:', err.message);
+      });
     }
     Alert.alert('Journey Finished', 'You have ended location tracking for this trip.', [
       { text: 'OK', onPress: onExit },

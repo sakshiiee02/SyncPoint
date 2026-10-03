@@ -4,3 +4,5 @@ export * from './status';
 export * from './liveLocation';
 export * from './route';
 export * from './chat';
+export * from './history';
+

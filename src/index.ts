@@ -44,5 +44,9 @@ export * from './features/journey/active/components/EmergencyActionSheet';
 export * from './features/journey/chat/JourneyChatScreen';
 export * from './services/firebase/chatService';
 export * from './services/firebase/statusService';
+export * from './services/firebase/historyService';
+export * from './utils/historyCompression';
+export * from './features/journey/history/HistoryDetailScreen';
 export * from './app/navigation/RootNavigator';
+
 

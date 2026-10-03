@@ -15,6 +15,7 @@ interface HomeScreenProps {
   onJoinJourney: () => void;
   onOpenJourney: (journeyId: string) => void;
   onOpenProfile: () => void;
+  onOpenHistory?: (journeyId: string) => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -22,6 +23,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onJoinJourney,
   onOpenJourney,
   onOpenProfile,
+  onOpenHistory,
 }) => {
   const { currentJourney, members } = useJourneyStore();
   const { profile } = useProfileStore();
@@ -100,21 +102,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Recent Journeys History (Section 6.3) */}
         <View style={styles.recentSection}>
-          <Text style={styles.recentHeader}>Recent Trips</Text>
-          <View style={styles.recentItem}>
+          <Text style={styles.recentHeader}>Recent Trips (Indefinite History)</Text>
+          <TouchableOpacity
+            style={styles.recentItem}
+            activeOpacity={0.7}
+            onPress={() => onOpenHistory && onOpenHistory('journey_demo_goa')}
+          >
+            <View>
+              <Text style={styles.recentTitle}>Goa Coastal Road Trip</Text>
+              <Text style={styles.recentSubtitle}>Dabolim Airport • Completed • 3 Travelers</Text>
+            </View>
+            <Text style={styles.recentDate}>Replay ➔</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.recentItem}
+            activeOpacity={0.7}
+            onPress={() => onOpenHistory && onOpenHistory('journey_demo_jaipur')}
+          >
             <View>
               <Text style={styles.recentTitle}>Jaipur Highway Convoy</Text>
-              <Text style={styles.recentSubtitle}>Amber Fort • Completed</Text>
+              <Text style={styles.recentSubtitle}>Amber Fort • Completed • 2 Travelers</Text>
             </View>
-            <Text style={styles.recentDate}>26 Sep</Text>
-          </View>
-          <View style={styles.recentItem}>
-            <View>
-              <Text style={styles.recentTitle}>Udaipur Lake Circuit</Text>
-              <Text style={styles.recentSubtitle}>Fateh Sagar • Completed</Text>
-            </View>
-            <Text style={styles.recentDate}>11 Aug</Text>
-          </View>
+            <Text style={styles.recentDate}>Replay ➔</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
