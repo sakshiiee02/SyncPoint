@@ -1,26 +1,56 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 interface NextManeuverBannerProps {
   instruction: string;
   distanceToManeuver: string;
+  maneuverIcon?: string;
   currentRoad?: string;
+  isOffRoute?: boolean;
+  isSecondaryRoute?: boolean;
+  secondaryTravelerName?: string | null;
+  onExitSecondaryRoute?: () => void;
 }
 
 /**
- * Top floating navigation banner displaying next turn maneuver.
- * Matches Section 6.4 & Section 11.2 of Developer Handoff.
+ * Top floating navigation banner displaying next turn maneuver, road name,
+ * off-route warnings, and temporary secondary traveler route badges.
+ * Matches Section 6.4, 11.2, and 11.3 of Developer Handoff.
  */
 export const NextManeuverBanner: React.FC<NextManeuverBannerProps> = ({
   instruction,
   distanceToManeuver,
-  currentRoad = 'NH 44',
+  maneuverIcon = '⬆️',
+  currentRoad = 'NH 48',
+  isOffRoute = false,
+  isSecondaryRoute = false,
+  secondaryTravelerName,
+  onExitSecondaryRoute,
 }) => {
   return (
-    <View style={styles.bannerContainer}>
+    <View style={[styles.bannerContainer, isOffRoute && styles.offRouteBanner, isSecondaryRoute && styles.secondaryBanner]}>
+      {/* Secondary Route Notification (Section 11.3) */}
+      {isSecondaryRoute && (
+        <View style={styles.secondaryHeader}>
+          <Text style={styles.secondaryHeaderText}>
+            🧭 Navigating to {secondaryTravelerName || 'Traveler'} (Temporary Route)
+          </Text>
+          <TouchableOpacity onPress={onExitSecondaryRoute} style={styles.exitSecondaryButton}>
+            <Text style={styles.exitSecondaryText}>Return to Journey</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Off-Route Alert */}
+      {isOffRoute && (
+        <View style={styles.offRouteBadge}>
+          <Text style={styles.offRouteText}>⚠️ Off Route • Recalculating route...</Text>
+        </View>
+      )}
+
       <View style={styles.maneuverRow}>
-        <View style={styles.iconCircle}>
-          <Text style={styles.turnIcon}>↰</Text>
+        <View style={[styles.iconCircle, isOffRoute && styles.offRouteIconCircle]}>
+          <Text style={styles.turnIcon}>{maneuverIcon}</Text>
         </View>
 
         <View style={styles.textContainer}>
@@ -58,6 +88,54 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 30,
   },
+  offRouteBanner: {
+    borderColor: '#eab308',
+    backgroundColor: 'rgba(26, 20, 10, 0.96)',
+  },
+  secondaryBanner: {
+    borderColor: '#818cf8',
+  },
+  secondaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(129, 140, 248, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 0.5,
+    borderColor: '#818cf8',
+  },
+  secondaryHeaderText: {
+    color: '#818cf8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  exitSecondaryButton: {
+    backgroundColor: '#818cf8',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  exitSecondaryText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  offRouteBadge: {
+    backgroundColor: 'rgba(234, 179, 8, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+  },
+  offRouteText: {
+    color: '#eab308',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   maneuverRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -70,6 +148,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#06b6d4',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  offRouteIconCircle: {
+    backgroundColor: '#eab308',
   },
   turnIcon: {
     color: '#ffffff',

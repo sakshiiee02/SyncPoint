@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useProfileStore } from '@/store/useProfileStore';
@@ -6,6 +6,7 @@ import {
   useLiveLocationStore,
   computeParticipantLiveState,
 } from '@/store/useLiveLocationStore';
+import { useNavigationStore } from '@/store/useNavigationStore';
 import {
   subscribeToLiveLocations,
   setLocationSharingPaused,
@@ -15,13 +16,16 @@ import { subscribeToJourney } from '@/services/firebase/rtdbService';
 import { LocationBridge, RawLocationUpdate } from '@/services/location/LocationBridge';
 import { requestLocationPermissions } from '@/services/location/permissionService';
 import { adaptiveSampler } from '@/services/location/adaptiveSamplingService';
+import { getRoute } from '@/services/routing/osrmService';
+import { evaluateNavigationProgress } from '@/services/routing/navigationEngine';
+import { voiceGuidance } from '@/services/routing/voiceGuidanceService';
 import { MapLibreContainer } from '@/components/map/MapLibreContainer';
 import { NextManeuverBanner } from './components/NextManeuverBanner';
 import { RecenterButton } from '@/components/map/RecenterButton';
 import { TravelerBottomSheet } from './components/TravelerBottomSheet';
 import { TravelerDetailCard } from './components/TravelerDetailCard';
 import { ParticipantLiveState, LiveLocationRecord } from '@/types/liveLocation';
-import { isWithinRadius, calculateDistanceMeters } from '@/utils/geoMath';
+import { isWithinRadius, calculateDistanceMeters, formatDistance } from '@/utils/geoMath';
 import { CONFIG } from '@/constants/config';
 
 interface ActiveJourneyScreenProps {
@@ -47,6 +51,21 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     setSelectedTravelerUid,
   } = useLiveLocationStore();
 
+  const {
+    activeRoute,
+    distanceToNextManeuverM,
+    nextInstruction,
+    maneuverIcon,
+    isOffRoute,
+    isSecondaryRoute,
+    secondaryTravelerName,
+    setActiveRoute,
+    updateProgress,
+    startSecondaryRouteToTraveler,
+    exitSecondaryRoute,
+    resetNavigation,
+  } = useNavigationStore();
+
   const [hasShownArrivalAlert, setHasShownArrivalAlert] = useState(false);
   const [isOverviewMode, setIsOverviewMode] = useState(false);
 
@@ -68,7 +87,124 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     };
   }, [journeyId, setCurrentJourney, setMembers, setAllLocations]);
 
-  // 2. Initialize Native Location Foreground Service (Phase 3)
+  // Compute live participant states
+  const participantStates: ParticipantLiveState[] = Object.values(members).map((member) => {
+    const liveRecord = locations[member.uid];
+    const isLocalUser = member.uid === profile?.uid;
+    return computeParticipantLiveState(liveRecord, member, isLocalUser);
+  });
+
+  const localParticipant = participantStates.find((p) => p.isLocalUser);
+  const selectedParticipant = participantStates.find((p) => p.uid === selectedTravelerUid);
+
+  // 2. Initial Route Calculation (Phase 4)
+  useEffect(() => {
+    async function loadInitialRoute() {
+      if (!currentJourney || activeRoute) return;
+
+      const myMember = profile?.uid ? members[profile.uid] : undefined;
+      const origin = myMember?.origin || {
+        lat: 28.6139,
+        lng: 77.209,
+        displayName: 'Current Location',
+      };
+      const travelMode = myMember?.travelMode || 'CAR';
+
+      try {
+        const route = await getRoute(
+          { lat: origin.lat, lng: origin.lng },
+          { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng },
+          travelMode
+        );
+        setActiveRoute(route);
+      } catch (e: any) {
+        console.warn('[ActiveJourney] Initial route failed:', e.message);
+      }
+    }
+
+    loadInitialRoute();
+  }, [currentJourney, members, profile?.uid, activeRoute, setActiveRoute]);
+
+  // 3. Navigation Evaluation & Voice Guidance on GPS Fix
+  const handleGpsUpdate = useCallback(
+    async (update: RawLocationUpdate) => {
+      if (!profile?.uid || !currentJourney) return;
+
+      const currentPoint = { lat: update.latitude, lng: update.longitude };
+
+      // Evaluate turn navigation if route is loaded
+      if (activeRoute) {
+        const progress = evaluateNavigationProgress(currentPoint, activeRoute);
+        updateProgress(progress);
+
+        // Voice navigation prompt
+        voiceGuidance.evaluateManeuverPrompt(
+          progress.currentStepIndex,
+          progress.distanceToNextManeuverM,
+          progress.instruction
+        );
+
+        // Off-route automatic recalculation (Section 11.2 & 267)
+        if (progress.isOffRoute && !isSecondaryRoute) {
+          const myMember = members[profile.uid];
+          getRoute(currentPoint, currentJourney.destination, myMember?.travelMode || 'CAR')
+            .then((recalculated) => setActiveRoute(recalculated))
+            .catch(() => {});
+        }
+      }
+
+      const distanceRemainingM = calculateDistanceMeters(
+        currentPoint,
+        { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng }
+      );
+
+      const safeSpeedMps = Math.max(update.speedMps, 1.0);
+      const etaEpochMs = Date.now() + Math.round((distanceRemainingM / safeSpeedMps) * 1000);
+
+      const shouldPublish =
+        update.shouldPublish ||
+        adaptiveSampler.shouldPublish(
+          update.latitude,
+          update.longitude,
+          update.speedMps,
+          update.heading
+        );
+
+      if (shouldPublish && !isSharingPaused) {
+        const liveRecord: LiveLocationRecord = {
+          lat: update.latitude,
+          lng: update.longitude,
+          heading: update.heading,
+          speedMps: update.speedMps,
+          batteryPct: 90,
+          status: 'ON_THE_WAY',
+          lastUpdatedAt: Date.now(),
+          currentRoad: activeRoute?.steps[0]?.name || 'Highway Corridor',
+          distanceRemainingM: Math.round(distanceRemainingM),
+          etaEpochMs,
+          routeVersion: activeRoute?.routeVersion || 1,
+          isSharing: true,
+        };
+
+        publishLiveLocation(journeyId, profile.uid, liveRecord).catch((err) => {
+          console.warn('[ActiveJourney] Live publish failed:', err.message);
+        });
+      }
+    },
+    [
+      profile?.uid,
+      currentJourney,
+      activeRoute,
+      members,
+      isSecondaryRoute,
+      isSharingPaused,
+      journeyId,
+      setActiveRoute,
+      updateProgress,
+    ]
+  );
+
+  // 4. Initialize Location Service & Listeners
   useEffect(() => {
     let unsubLocationBridge: (() => void) | null = null;
 
@@ -80,49 +216,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
       const destTitle = currentJourney?.destination.displayName || 'Destination';
 
       await LocationBridge.startTracking(journeyId, journeyTitle, destTitle);
-
-      // Listen to raw fixes from Kotlin LocationEngine
-      unsubLocationBridge = LocationBridge.addLocationListener((update: RawLocationUpdate) => {
-        if (!profile?.uid || !currentJourney) return;
-
-        const distanceRemainingM = calculateDistanceMeters(
-          { lat: update.latitude, lng: update.longitude },
-          { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng }
-        );
-
-        const safeSpeedMps = Math.max(update.speedMps, 1.0);
-        const etaEpochMs = Date.now() + Math.round((distanceRemainingM / safeSpeedMps) * 1000);
-
-        const shouldPublish =
-          update.shouldPublish ||
-          adaptiveSampler.shouldPublish(
-            update.latitude,
-            update.longitude,
-            update.speedMps,
-            update.heading
-          );
-
-        if (shouldPublish && !isSharingPaused) {
-          const liveRecord: LiveLocationRecord = {
-            lat: update.latitude,
-            lng: update.longitude,
-            heading: update.heading,
-            speedMps: update.speedMps,
-            batteryPct: 90, // Updated via battery monitor
-            status: 'ON_THE_WAY',
-            lastUpdatedAt: Date.now(),
-            currentRoad: 'Highway Corridor',
-            distanceRemainingM: Math.round(distanceRemainingM),
-            etaEpochMs,
-            routeVersion: 1,
-            isSharing: true,
-          };
-
-          publishLiveLocation(journeyId, profile.uid, liveRecord).catch((err) => {
-            console.warn('[ActiveJourney] Live publish failed:', err.message);
-          });
-        }
-      });
+      unsubLocationBridge = LocationBridge.addLocationListener(handleGpsUpdate);
     }
 
     initTracking();
@@ -130,20 +224,11 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     return () => {
       if (unsubLocationBridge) unsubLocationBridge();
       adaptiveSampler.reset();
+      voiceGuidance.reset();
     };
-  }, [journeyId, currentJourney, profile?.uid, isSharingPaused]);
+  }, [journeyId, currentJourney, handleGpsUpdate]);
 
-  // Compute live participant states
-  const participantStates: ParticipantLiveState[] = Object.values(members).map((member) => {
-    const liveRecord = locations[member.uid];
-    const isLocalUser = member.uid === profile?.uid;
-    return computeParticipantLiveState(liveRecord, member, isLocalUser);
-  });
-
-  const localParticipant = participantStates.find((p) => p.isLocalUser);
-  const selectedParticipant = participantStates.find((p) => p.uid === selectedTravelerUid);
-
-  // 3. Proximity / Arrival Check (Section 5.6 & 22)
+  // 5. Proximity / Arrival Check (Section 5.6 & 22)
   useEffect(() => {
     if (!currentJourney || !localParticipant || hasShownArrivalAlert) return;
 
@@ -170,7 +255,24 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     }
   }, [localParticipant, currentJourney, hasShownArrivalAlert]);
 
-  // 4. Handle Pause / Resume Location Sharing (Section 8.5 & 22)
+  // 6. Handle Secondary Route to Traveler (Section 11.3)
+  const handleNavigateToTraveler = async (targetTraveler: ParticipantLiveState) => {
+    if (!localParticipant) return;
+
+    try {
+      const secondaryRoute = await getRoute(
+        { lat: localParticipant.lat, lng: localParticipant.lng },
+        { lat: targetTraveler.lat, lng: targetTraveler.lng },
+        'CAR'
+      );
+      startSecondaryRouteToTraveler(targetTraveler.name, secondaryRoute);
+      setSelectedTravelerUid(null);
+    } catch (e: any) {
+      Alert.alert('Route Failed', `Could not calculate route to ${targetTraveler.name}.`);
+    }
+  };
+
+  // 7. Handle Pause / Resume Location Sharing
   const handleTogglePause = async () => {
     if (!profile?.uid || !localParticipant) return;
     const nextPaused = !isSharingPaused;
@@ -205,9 +307,10 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     }
   };
 
-  // 5. Handle Finish Journey (Section 5.6)
+  // 8. Handle Finish Journey (Section 5.6)
   const handleFinishJourney = async () => {
     await LocationBridge.finishTracking();
+    resetNavigation();
     if (profile?.uid) {
       updateMemberSharingState(profile.uid, 'FINISHED');
     }
@@ -231,11 +334,16 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
         selectedParticipantUid={selectedTravelerUid}
         onSelectParticipant={(uid) => setSelectedTravelerUid(uid)}
       >
-        {/* Next Maneuver Banner (Section 6.4) */}
+        {/* Next Maneuver Banner (Section 6.4, 11.2, 11.3) */}
         <NextManeuverBanner
-          instruction="Continue on highway toward destination"
-          distanceToManeuver="3.2 km"
+          instruction={nextInstruction}
+          distanceToManeuver={formatDistance(distanceToNextManeuverM)}
+          maneuverIcon={maneuverIcon}
           currentRoad={localParticipant?.currentRoad || 'NH 48'}
+          isOffRoute={isOffRoute}
+          isSecondaryRoute={isSecondaryRoute}
+          secondaryTravelerName={secondaryTravelerName}
+          onExitSecondaryRoute={exitSecondaryRoute}
         />
 
         {/* Floating Camera Controls */}
@@ -257,12 +365,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           participant={selectedParticipant}
           destinationName={destination.displayName}
           onClose={() => setSelectedTravelerUid(null)}
-          onNavigateToTraveler={(p) => {
-            Alert.alert(
-              'Secondary Route',
-              `Navigating to ${p.name}. Common destination remains ${destination.displayName}.`
-            );
-          }}
+          onNavigateToTraveler={handleNavigateToTraveler}
         />
       )}
 
