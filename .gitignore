@@ -1,0 +1,43 @@
+# Node & dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.apk
+*.aab
+
+# React Native & Metro
+.metro/
+.expo/
+.bundle/
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+local.properties
+*.keystore
+!debug.keystore
+
+# Environment & credentials
+.env
+.env.local
+.env.production
+google-services.json
+firebase-debug.log*
+firestore-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+docs/

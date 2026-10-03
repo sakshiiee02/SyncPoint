@@ -1,0 +1,10 @@
+services:
+  osrm-car:
+    image: osrm/osrm-backend:latest
+    container_name: syncpoint-osrm-car
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    command: osrm-routed --algorithm mld /data/region.osrm
+    volumes:
+      - ./data:/data

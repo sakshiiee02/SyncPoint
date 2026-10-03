@@ -1,0 +1,43 @@
+{
+  "name": "syncpoint",
+  "version": "1.0.0",
+  "description": "Live group travel tracking and navigation for friends on road trips (Android V1)",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "test": "node --test tests/unit/geoMath.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/"
+  },
+  "dependencies": {
+    "@maplibre/maplibre-react-native": "^10.0.0",
+    "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-community/netinfo": "^11.4.1",
+    "@react-navigation/native": "^7.0.14",
+    "@react-navigation/native-stack": "^7.2.0",
+    "firebase": "^11.4.0",
+    "react": "19.0.0",
+    "react-native": "0.78.0",
+    "react-native-safe-area-context": "^5.3.0",
+    "react-native-screens": "^4.9.1",
+    "react-native-svg": "^15.11.2",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/react": "^19.0.10",
+    "typescript": "^5.8.2"
+  },
+  "keywords": [
+    "realtime-tracking",
+    "group-navigation",
+    "road-trip",
+    "maplibre",
+    "firebase-rtdb",
+    "syncpoint"
+  ],
+  "author": "SyncPoint Team",
+  "license": "UNLICENSED"
+}

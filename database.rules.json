@@ -1,0 +1,60 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['uid', 'name', 'username'])"
+      }
+    },
+    "journeys": {
+      "$journeyId": {
+        ".read": "auth != null && (root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() || auth.uid === data.child('meta/creatorUid').val())",
+        "meta": {
+          ".write": "auth != null && (!data.exists() && newData.child('creatorUid').val() === auth.uid || data.child('creatorUid').val() === auth.uid)",
+          "destination": {
+            ".write": "auth != null && !data.exists() && newData.parent().child('creatorUid').val() === auth.uid"
+          }
+        },
+        "members": {
+          ".read": "auth != null && (root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() || auth.uid === root.child('journeys/' + $journeyId + '/meta/creatorUid').val())",
+          "$uid": {
+            ".write": "auth != null && ($uid === auth.uid || root.child('journeys/' + $journeyId + '/meta/creatorUid').val() === auth.uid)"
+          }
+        },
+        "live": {
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid && root.child('journeys/' + $journeyId + '/meta/status').val() === 'ACTIVE' && root.child('journeys/' + $journeyId + '/meta/expiresAt').val() > now"
+          }
+        },
+        "routes": {
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid"
+          }
+        },
+        "chat": {
+          "$messageId": {
+            ".write": "auth != null && root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() && (!data.exists() && newData.child('senderUid').val() === auth.uid)"
+          }
+        },
+        "history": {
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid"
+          }
+        }
+      }
+    },
+    "joinCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": false
+      }
+    },
+    "activeJourneyByUser": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
+}
