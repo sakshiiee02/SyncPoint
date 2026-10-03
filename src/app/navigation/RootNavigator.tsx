@@ -10,6 +10,7 @@ import { JoinJourneyScreen } from '@/features/journey/join/JoinJourneyScreen';
 import { OriginTravelModeScreen } from '@/features/journey/join/OriginTravelModeScreen';
 import { JourneyLobbyScreen } from '@/features/journey/lobby/JourneyLobbyScreen';
 import { ActiveJourneyScreen } from '@/features/journey/active/ActiveJourneyScreen';
+import { JourneyChatScreen } from '@/features/journey/chat/JourneyChatScreen';
 import { JourneyMeta } from '@/types/journey';
 
 type ScreenName =
@@ -19,7 +20,8 @@ type ScreenName =
   | 'JoinJourney'
   | 'OriginTravelMode'
   | 'JourneyLobby'
-  | 'ActiveJourney';
+  | 'ActiveJourney'
+  | 'JourneyChat';
 
 export const RootNavigator: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('Home');
@@ -121,9 +123,17 @@ export const RootNavigator: React.FC = () => {
         <ActiveJourneyScreen
           journeyId={currentJourney?.journeyId || ''}
           onExit={() => setCurrentScreen('Home')}
-          onOpenChat={() => {
-            alert('Group chat screen (Phase 6)');
-          }}
+          onOpenChat={() => setCurrentScreen('JourneyChat')}
+        />
+      );
+
+    case 'JourneyChat':
+      return (
+        <JourneyChatScreen
+          journeyId={currentJourney?.journeyId || ''}
+          journeyName={currentJourney?.name || 'Convoy'}
+          onClose={() => setCurrentScreen('ActiveJourney')}
+          onOpenEmergency={() => setCurrentScreen('ActiveJourney')}
         />
       );
 

@@ -39,4 +39,10 @@ export * from './features/journey/active/components/NextManeuverBanner';
 export * from './features/journey/active/components/TravelerBottomSheet';
 export * from './features/journey/active/components/TravelerDetailCard';
 export * from './features/journey/active/components/OfflineMapModal';
+export * from './features/journey/active/components/QuickStatusPicker';
+export * from './features/journey/active/components/EmergencyActionSheet';
+export * from './features/journey/chat/JourneyChatScreen';
+export * from './services/firebase/chatService';
+export * from './services/firebase/statusService';
 export * from './app/navigation/RootNavigator';
+

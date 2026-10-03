@@ -27,6 +27,10 @@ import { RecenterButton } from '@/components/map/RecenterButton';
 import { TravelerBottomSheet } from './components/TravelerBottomSheet';
 import { TravelerDetailCard } from './components/TravelerDetailCard';
 import { OfflineMapModal } from './components/OfflineMapModal';
+import { QuickStatusPicker } from './components/QuickStatusPicker';
+import { EmergencyActionSheet } from './components/EmergencyActionSheet';
+import { broadcastQuickStatus } from '@/services/firebase/statusService';
+import { QuickStatusType } from '@/types/status';
 import { ParticipantLiveState, LiveLocationRecord } from '@/types/liveLocation';
 import { isWithinRadius, calculateDistanceMeters, formatDistance } from '@/utils/geoMath';
 import { CONFIG } from '@/constants/config';
@@ -72,6 +76,21 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
   const [hasShownArrivalAlert, setHasShownArrivalAlert] = useState(false);
   const [isOverviewMode, setIsOverviewMode] = useState(false);
   const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
+  const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
+
+  // Broadcast quick travel status (Section 14.2 & 14.3)
+  const handleSelectStatus = async (status: QuickStatusType) => {
+    if (!profile?.uid || !currentJourney) return;
+    try {
+      await broadcastQuickStatus(
+        journeyId,
+        { uid: profile.uid, name: profile.name || 'Traveler' },
+        status
+      );
+    } catch (e: any) {
+      console.warn('Failed to update status:', e.message);
+    }
+  };
 
   // 1. Subscribe to Journey Metadata & Live Locations
   useEffect(() => {
@@ -365,6 +384,13 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           onExitSecondaryRoute={exitSecondaryRoute}
         />
 
+        {/* Quick Travel Status Bar (Section 14.2) */}
+        <QuickStatusPicker
+          currentStatus={localParticipant?.status || 'ON_THE_WAY'}
+          onSelectStatus={handleSelectStatus}
+          onOpenEmergency={() => setIsEmergencyOpen(true)}
+        />
+
         {/* Floating Camera Controls */}
         <RecenterButton
           onRecenterSelf={() => {
@@ -408,6 +434,20 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           journeyId={journeyId}
           destination={destination}
           onClose={() => setIsOfflineModalOpen(false)}
+        />
+      )}
+
+      {/* Emergency Assistance Sheet (Section 14.3) */}
+      {isEmergencyOpen && (
+        <EmergencyActionSheet
+          currentLocation={
+            localParticipant ? { lat: localParticipant.lat, lng: localParticipant.lng } : null
+          }
+          currentRoad={localParticipant?.currentRoad}
+          destination={destination}
+          participants={participantStates}
+          onClose={() => setIsEmergencyOpen(false)}
+          onBroadcastHelpStatus={() => handleSelectStatus('NEED_HELP')}
         />
       )}
     </View>
