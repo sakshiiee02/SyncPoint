@@ -7,7 +7,7 @@
   "scripts": {
     "start": "react-native start",
     "android": "react-native run-android",
-    "test": "node --test tests/unit/geoMath.test.mjs tests/unit/journeyLifecycle.test.mjs tests/unit/liveMapSurface.test.mjs tests/unit/adaptiveSampling.test.mjs tests/unit/movementSimulator.test.mjs tests/unit/routingAndNavigation.test.mjs",
+    "test": "node --test tests/unit/geoMath.test.mjs tests/unit/journeyLifecycle.test.mjs tests/unit/liveMapSurface.test.mjs tests/unit/adaptiveSampling.test.mjs tests/unit/movementSimulator.test.mjs tests/unit/routingAndNavigation.test.mjs tests/unit/offlineAndSync.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src/"
   },

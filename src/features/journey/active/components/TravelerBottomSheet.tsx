@@ -16,6 +16,7 @@ interface TravelerBottomSheetProps {
   isSharingPaused: boolean;
   onTogglePauseSharing: () => void;
   onOpenChat: () => void;
+  onOpenOfflineMap: () => void;
   onFinishJourney: () => void;
 }
 
@@ -26,6 +27,7 @@ export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
   isSharingPaused,
   onTogglePauseSharing,
   onOpenChat,
+  onOpenOfflineMap,
   onFinishJourney,
 }) => {
   return (
@@ -41,12 +43,16 @@ export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
           activeOpacity={0.8}
         >
           <Text style={styles.pauseButtonText}>
-            {isSharingPaused ? '▶️ Resume Live Sharing' : '⏸️ Pause Location'}
+            {isSharingPaused ? '▶️ Resume' : '⏸️ Pause'}
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.offlineButton} onPress={onOpenOfflineMap} activeOpacity={0.8}>
+          <Text style={styles.offlineButtonText}>🗺️ Offline</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.chatButton} onPress={onOpenChat} activeOpacity={0.8}>
-          <Text style={styles.chatButtonText}>💬 Group Chat</Text>
+          <Text style={styles.chatButtonText}>💬 Chat</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.finishButton} onPress={onFinishJourney} activeOpacity={0.8}>
@@ -176,8 +182,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  offlineButton: {
+    flex: 1.3,
+    backgroundColor: '#1e293b',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  offlineButtonText: {
+    color: '#06b6d4',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   chatButton: {
-    flex: 1.5,
+    flex: 1.2,
     backgroundColor: '#1e293b',
     paddingVertical: 10,
     borderRadius: 10,

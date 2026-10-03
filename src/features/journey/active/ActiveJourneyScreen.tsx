@@ -19,11 +19,14 @@ import { adaptiveSampler } from '@/services/location/adaptiveSamplingService';
 import { getRoute } from '@/services/routing/osrmService';
 import { evaluateNavigationProgress } from '@/services/routing/navigationEngine';
 import { voiceGuidance } from '@/services/routing/voiceGuidanceService';
+import { localDb } from '@/db/sqliteClient';
+import { syncService } from '@/services/offlineMaps/reconnectSyncService';
 import { MapLibreContainer } from '@/components/map/MapLibreContainer';
 import { NextManeuverBanner } from './components/NextManeuverBanner';
 import { RecenterButton } from '@/components/map/RecenterButton';
 import { TravelerBottomSheet } from './components/TravelerBottomSheet';
 import { TravelerDetailCard } from './components/TravelerDetailCard';
+import { OfflineMapModal } from './components/OfflineMapModal';
 import { ParticipantLiveState, LiveLocationRecord } from '@/types/liveLocation';
 import { isWithinRadius, calculateDistanceMeters, formatDistance } from '@/utils/geoMath';
 import { CONFIG } from '@/constants/config';
@@ -68,8 +71,9 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
 
   const [hasShownArrivalAlert, setHasShownArrivalAlert] = useState(false);
   const [isOverviewMode, setIsOverviewMode] = useState(false);
+  const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
 
-  // 1. Subscribe to Journey Metadata & Live Locations from Firebase
+  // 1. Subscribe to Journey Metadata & Live Locations
   useEffect(() => {
     const unsubJourney = subscribeToJourney(
       journeyId,
@@ -87,20 +91,16 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
     };
   }, [journeyId, setCurrentJourney, setMembers, setAllLocations]);
 
-  // Compute live participant states
-  const participantStates: ParticipantLiveState[] = Object.values(members).map((member) => {
-    const liveRecord = locations[member.uid];
-    const isLocalUser = member.uid === profile?.uid;
-    return computeParticipantLiveState(liveRecord, member, isLocalUser);
-  });
-
-  const localParticipant = participantStates.find((p) => p.isLocalUser);
-  const selectedParticipant = participantStates.find((p) => p.uid === selectedTravelerUid);
-
-  // 2. Initial Route Calculation (Phase 4)
+  // 2. Initial Route Calculation with Offline SQLite Caching (Phase 5)
   useEffect(() => {
     async function loadInitialRoute() {
       if (!currentJourney || activeRoute) return;
+
+      // Check SQLite cache first for instant offline startup
+      const cached = await localDb.getCachedRoute(journeyId);
+      if (cached) {
+        setActiveRoute(cached);
+      }
 
       const myMember = profile?.uid ? members[profile.uid] : undefined;
       const origin = myMember?.origin || {
@@ -117,13 +117,24 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           travelMode
         );
         setActiveRoute(route);
+        await localDb.cacheRoute(journeyId, route);
       } catch (e: any) {
-        console.warn('[ActiveJourney] Initial route failed:', e.message);
+        console.warn('[ActiveJourney] Route fetch failed, using cached corridor:', e.message);
       }
     }
 
     loadInitialRoute();
-  }, [currentJourney, members, profile?.uid, activeRoute, setActiveRoute]);
+  }, [currentJourney, members, profile?.uid, activeRoute, setActiveRoute, journeyId]);
+
+  // Compute live participant states
+  const participantStates: ParticipantLiveState[] = Object.values(members).map((member) => {
+    const liveRecord = locations[member.uid];
+    const isLocalUser = member.uid === profile?.uid;
+    return computeParticipantLiveState(liveRecord, member, isLocalUser);
+  });
+
+  const localParticipant = participantStates.find((p) => p.isLocalUser);
+  const selectedParticipant = participantStates.find((p) => p.uid === selectedTravelerUid);
 
   // 3. Navigation Evaluation & Voice Guidance on GPS Fix
   const handleGpsUpdate = useCallback(
@@ -148,7 +159,10 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
         if (progress.isOffRoute && !isSecondaryRoute) {
           const myMember = members[profile.uid];
           getRoute(currentPoint, currentJourney.destination, myMember?.travelMode || 'CAR')
-            .then((recalculated) => setActiveRoute(recalculated))
+            .then((recalculated) => {
+              setActiveRoute(recalculated);
+              localDb.cacheRoute(journeyId, recalculated);
+            })
             .catch(() => {});
         }
       }
@@ -186,9 +200,14 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           isSharing: true,
         };
 
-        publishLiveLocation(journeyId, profile.uid, liveRecord).catch((err) => {
-          console.warn('[ActiveJourney] Live publish failed:', err.message);
-        });
+        // Offline Buffer Handling (Section 12): buffer if disconnected, else publish directly
+        const isOnline = await syncService.handleLocationUpdate(journeyId, profile.uid, liveRecord);
+        if (isOnline) {
+          publishLiveLocation(journeyId, profile.uid, liveRecord).catch((err) => {
+            console.warn('[ActiveJourney] Live publish failed, buffering:', err.message);
+            localDb.bufferLocation(journeyId, profile.uid, liveRecord);
+          });
+        }
       }
     },
     [
@@ -378,7 +397,17 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
           isSharingPaused={isSharingPaused}
           onTogglePauseSharing={handleTogglePause}
           onOpenChat={onOpenChat}
+          onOpenOfflineMap={() => setIsOfflineModalOpen(true)}
           onFinishJourney={handleFinishJourney}
+        />
+      )}
+
+      {/* Offline Map Pack Download Modal (Section 12.1) */}
+      {isOfflineModalOpen && (
+        <OfflineMapModal
+          journeyId={journeyId}
+          destination={destination}
+          onClose={() => setIsOfflineModalOpen(false)}
         />
       )}
     </View>
