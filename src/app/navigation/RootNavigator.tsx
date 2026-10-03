@@ -9,6 +9,7 @@ import { CreateJourneyScreen } from '@/features/journey/create/CreateJourneyScre
 import { JoinJourneyScreen } from '@/features/journey/join/JoinJourneyScreen';
 import { OriginTravelModeScreen } from '@/features/journey/join/OriginTravelModeScreen';
 import { JourneyLobbyScreen } from '@/features/journey/lobby/JourneyLobbyScreen';
+import { ActiveJourneyScreen } from '@/features/journey/active/ActiveJourneyScreen';
 import { JourneyMeta } from '@/types/journey';
 
 type ScreenName =
@@ -84,7 +85,14 @@ export const RootNavigator: React.FC = () => {
 
     case 'OriginTravelMode':
       if (!pendingJoinJourney) {
-        return <HomeScreen onCreateJourney={() => setCurrentScreen('CreateJourney')} onJoinJourney={() => setCurrentScreen('JoinJourney')} onOpenJourney={() => setCurrentScreen('JourneyLobby')} onOpenProfile={() => setCurrentScreen('Profile')} />;
+        return (
+          <HomeScreen
+            onCreateJourney={() => setCurrentScreen('CreateJourney')}
+            onJoinJourney={() => setCurrentScreen('JoinJourney')}
+            onOpenJourney={() => setCurrentScreen('JourneyLobby')}
+            onOpenProfile={() => setCurrentScreen('Profile')}
+          />
+        );
       }
       return (
         <OriginTravelModeScreen
@@ -102,10 +110,20 @@ export const RootNavigator: React.FC = () => {
           journeyId={currentJourney?.journeyId || ''}
           joinCode={activeJoinCode || ''}
           onStartTracking={() => {
-            // Next phase: Map tracking surface
-            alert('Starting live tracking service (Phase 2 & 3)');
+            setCurrentScreen('ActiveJourney');
           }}
           onLeave={() => setCurrentScreen('Home')}
+        />
+      );
+
+    case 'ActiveJourney':
+      return (
+        <ActiveJourneyScreen
+          journeyId={currentJourney?.journeyId || ''}
+          onExit={() => setCurrentScreen('Home')}
+          onOpenChat={() => {
+            alert('Group chat screen (Phase 6)');
+          }}
         />
       );
 
@@ -115,7 +133,7 @@ export const RootNavigator: React.FC = () => {
         <HomeScreen
           onCreateJourney={() => setCurrentScreen('CreateJourney')}
           onJoinJourney={() => setCurrentScreen('JoinJourney')}
-          onOpenJourney={(_journeyId) => setCurrentScreen('JourneyLobby')}
+          onOpenJourney={(_journeyId) => setCurrentScreen('ActiveJourney')}
           onOpenProfile={() => setCurrentScreen('Profile')}
         />
       );
