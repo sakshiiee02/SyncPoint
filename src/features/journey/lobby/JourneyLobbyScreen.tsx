@@ -23,6 +23,8 @@ import { usePickedPlace } from '@/store/usePlacePickerStore';
 import { PickerTarget, pickedToOrigin } from '@/domain/placeMapping';
 import { PlaceField } from '@/components/common/PlaceField';
 import { ModeIcon } from '@/components/common/ModeIcon';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
+import { defaultMascot } from '@/domain/mascot';
 import { buildAppLink, buildInviteLink } from '@/domain/inviteLink';
 import { travelerStateLabel } from '@/domain/travelerState';
 import { ENV } from '@/config/env';
@@ -278,10 +280,8 @@ ${link}`,
 
           return (
             <View key={member.uid} style={[styles.memberCard, isMe && styles.memberCardMe]}>
-              <View style={[styles.avatar, isMe && styles.avatarMe]}>
-                <Text style={[styles.avatarText, isMe && styles.avatarTextMe]}>
-                  {member.name.charAt(0).toUpperCase()}
-                </Text>
+              <View style={styles.avatarWrap}>
+                <MascotAvatar mascot={member.mascot ?? defaultMascot(member.uid)} size={44} />
               </View>
 
               <View style={styles.memberInfo}>
@@ -532,6 +532,9 @@ const styles = StyleSheet.create({
   memberCardMe: {
     borderColor: '#bfdbfe',
     backgroundColor: '#eff6ff',
+  },
+  avatarWrap: {
+    marginRight: 12,
   },
   avatar: {
     width: 40,

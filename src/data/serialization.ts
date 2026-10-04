@@ -1,5 +1,6 @@
 import { JourneyMember, OriginLocation, TravelerState, TravelMode } from '@/types/member';
 import { JourneyMeta } from '@/types/journey';
+import { normalizeMascot } from '@/domain/mascot';
 
 /**
  * RTDB cannot store `undefined` and silently drops `null`, and the rules expect `seat` as a
@@ -39,6 +40,7 @@ export function memberFromDb(uid: string, raw: Record<string, any>): JourneyMemb
     phone: raw.phone ?? '',
     photoUrl: raw.photoUrl ?? undefined,
     seat: Number(raw.seat ?? 0),
+    mascot: normalizeMascot(raw.mascot, uid),
     origin: {
       kind: origin.kind ?? 'PLACE',
       lat: typeof origin.lat === 'number' ? origin.lat : null,

@@ -38,6 +38,11 @@ android {
         versionCode 1
         versionName "1.0.0"
         manifestPlaceholders = [inviteHost: inviteHost]
+        // Real phones are arm64 (all modern devices) or armeabi-v7a (older 32-bit ones). Skipping the
+        // x86 emulator builds roughly halves the APK.
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
     }
 
     signingConfigs {
@@ -88,11 +93,7 @@ dependencies {
     // Google Play Services Fused Location (Foreground Service)
     implementation("com.google.android.gms:play-services-location:21.2.0")
 
-    // Firebase Android SDKs
-    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
-    implementation("com.google.firebase:firebase-database-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-messaging-ktx")
+    // Firebase is used from JavaScript (firebase web SDK); no native Firebase SDKs are needed.
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

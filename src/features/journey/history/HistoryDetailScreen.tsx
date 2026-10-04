@@ -13,6 +13,7 @@ import { getJourneyHistory } from '@/services/firebase/historyService';
 import { MapLibreContainer } from '@/components/map/MapLibreContainer';
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance, formatDuration } from '@/utils/geoMath';
+import { defaultMascot } from '@/domain/mascot';
 import {
   BackIcon,
   PlayIcon,
@@ -131,6 +132,8 @@ export const HistoryDetailScreen: React.FC<HistoryDetailScreenProps> = ({
       name: t.name,
       phone: '',
       isLocalUser: isSelected,
+      seat: 0,
+      mascot: defaultMascot(t.uid),
       travelerState: 'ARRIVED',
       travelMode: t.travelMode,
       originLabel: '',

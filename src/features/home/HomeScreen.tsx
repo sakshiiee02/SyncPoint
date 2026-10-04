@@ -12,6 +12,7 @@ import { useProfileStore } from '@/store/useProfileStore';
 import { listRecentJourneys } from '@/services/firebase/historyService';
 import { RecentJourneySummary } from '@/types/history';
 import { isTravelingState } from '@/types/member';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
 import {
   SearchIcon,
   MicIcon,
@@ -71,9 +72,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <Text style={styles.brandTagline}>Group Journey & Convoy Sync</Text>
           </View>
           <TouchableOpacity style={styles.profileBadge} onPress={onOpenProfile} activeOpacity={0.8}>
-            <Text style={styles.profileInitial}>
-              {profile?.name ? profile.name.charAt(0).toUpperCase() : '?'}
-            </Text>
+            {profile?.mascot ? (
+              <MascotAvatar mascot={profile.mascot} size={40} />
+            ) : (
+              <Text style={styles.profileInitial}>?</Text>
+            )}
           </TouchableOpacity>
         </View>
 

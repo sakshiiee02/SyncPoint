@@ -82,6 +82,12 @@
             "phone": { ".validate": "newData.isString() && newData.val().length <= 24" },
             "photoUrl": { ".validate": "newData.isString() && newData.val().length <= 2000" },
             "seat": { ".validate": "newData.isString() && newData.val().matches(/^[0-9]$/)" },
+            "mascot": {
+              ".validate": "newData.hasChildren(['animal', 'color'])",
+              "animal": { ".validate": "newData.val() === 'BEAR' || newData.val() === 'CAT' || newData.val() === 'DOG' || newData.val() === 'FOX' || newData.val() === 'RABBIT' || newData.val() === 'PANDA' || newData.val() === 'FROG' || newData.val() === 'LION' || newData.val() === 'OWL' || newData.val() === 'KOALA'" },
+              "color": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)" },
+              "$other": { ".validate": false }
+            },
             "origin": {
               ".validate": "newData.hasChildren(['kind', 'displayName'])",
               "kind": { ".validate": "newData.val() === 'GPS' || newData.val() === 'PLACE' || newData.val() === 'MAP'" },
@@ -117,6 +123,21 @@
             "etaEpochMs": { ".validate": "newData.isNumber()" },
             "routeVersion": { ".validate": "newData.isNumber()" },
             "isSharing": { ".validate": "newData.isBoolean()" },
+            "$other": { ".validate": false }
+          }
+        },
+
+        "routes": {
+          ".read": "auth != null && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists()",
+          "$uid": {
+            ".write": "auth != null && ((!newData.exists() && (auth.uid === $uid || root.child('journeys').child($journeyId).child('meta').child('creatorUid').val() === auth.uid)) || (newData.exists() && auth.uid === $uid && (root.child('journeys').child($journeyId).child('meta').child('status').val() === 'LOBBY' || root.child('journeys').child($journeyId).child('meta').child('status').val() === 'ACTIVE') && (root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'TRAVELING' || root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'PAUSED' || root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'ARRIVED')))",
+            ".validate": "newData.hasChildren(['polyline', 'distanceM', 'durationS', 'version', 'updatedAt'])",
+            "polyline": { ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 100000" },
+            "distanceM": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "durationS": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "version": { ".validate": "newData.isNumber()" },
+            "source": { ".validate": "newData.val() === 'ORS' || newData.val() === 'OSRM'" },
+            "updatedAt": { ".validate": "newData.isNumber()" },
             "$other": { ".validate": false }
           }
         },

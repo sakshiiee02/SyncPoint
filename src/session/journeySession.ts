@@ -2,7 +2,7 @@ import { expireIfOverdue, subscribeToJourney } from '@/data/journeyRepository';
 import { clearUserJourney } from '@/data/userJourneyRepository';
 import { serverNow } from '@/data/serverClock';
 import { getFirebaseDb } from '@/services/firebase/firebaseApp';
-import { subscribeToLiveLocations } from '@/services/firebase/liveLocationService';
+import { subscribeToLiveLocations, subscribeToSharedRoutes } from '@/services/firebase/liveLocationService';
 import { flushChatOutbox } from '@/services/firebase/chatService';
 import { deliverAlerts } from '@/services/notifications/alerts';
 import { diffLive, diffMembers, diffMeta } from '@/domain/journeyEvents';
@@ -27,6 +27,7 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 class JourneySession {
   private unsubscribe: (() => void) | null = null;
   private unsubscribeLive: (() => void) | null = null;
+  private unsubscribeRoutes: (() => void) | null = null;
   private unsubscribeReconnect: (() => void) | null = null;
   private journeyId: string | null = null;
   private uid: string | null = null;
@@ -70,6 +71,10 @@ class JourneySession {
       this.alertOnLiveChanges(locations);
     });
 
+    this.unsubscribeRoutes = subscribeToSharedRoutes(journeyId, (routes) =>
+      useLiveLocationStore.getState().setRoutes(routes)
+    );
+
     // Messages typed while offline go out as soon as the connection is back (and on resume).
     this.unsubscribeReconnect = onReconnect(() => void flushChatOutbox(journeyId).catch(() => undefined));
     void flushChatOutbox(journeyId).catch(() => undefined);
@@ -90,6 +95,8 @@ class JourneySession {
     this.unsubscribe = null;
     this.unsubscribeLive?.();
     this.unsubscribeLive = null;
+    this.unsubscribeRoutes?.();
+    this.unsubscribeRoutes = null;
     this.unsubscribeReconnect?.();
     this.unsubscribeReconnect = null;
     if (this.expiryTimer) clearTimeout(this.expiryTimer);

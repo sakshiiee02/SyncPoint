@@ -1,6 +1,7 @@
 import { ref, set, onValue, off, DataSnapshot, serverTimestamp } from 'firebase/database';
 import { getFirebaseDb } from './firebaseApp';
 import { LiveLocationRecord } from '@/types/liveLocation';
+import { SharedRoute } from '@/types/route';
 import { stripUndefined } from '@/data/serialization';
 import { Paths } from '@/data/paths';
 
@@ -33,4 +34,29 @@ export function subscribeToLiveLocations(
 
   onValue(livePathRef, callback, () => onLocationsUpdate({}));
   return () => off(livePathRef, 'value', callback);
+}
+
+/** Shares this traveler's route so friends can see where they are heading. */
+export async function publishSharedRoute(
+  journeyId: string,
+  uid: string,
+  route: SharedRoute
+): Promise<void> {
+  await set(ref(getFirebaseDb(), Paths.routeOf(journeyId, uid)), {
+    ...route,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Everyone's shared routes (members only, enforced by rules). */
+export function subscribeToSharedRoutes(
+  journeyId: string,
+  onRoutes: (routes: Record<string, SharedRoute>) => void
+): () => void {
+  const routesRef = ref(getFirebaseDb(), Paths.routes(journeyId));
+  const callback = (snapshot: DataSnapshot) => {
+    onRoutes(snapshot.exists() ? (snapshot.val() as Record<string, SharedRoute>) : {});
+  };
+  onValue(routesRef, callback, () => onRoutes({}));
+  return () => off(routesRef, 'value', callback);
 }

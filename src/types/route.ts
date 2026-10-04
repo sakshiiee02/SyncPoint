@@ -26,6 +26,17 @@ export interface RouteStep {
  */
 export type RouteSource = 'ORS' | 'OSRM' | 'ESTIMATE';
 
+/** A route as shared with the other travelers (compact, drawn on their maps). */
+export interface SharedRoute {
+  /** Encoded polyline (precision 5) of the simplified route. */
+  polyline: string;
+  distanceM: number;
+  durationS: number;
+  version: number;
+  source: 'ORS' | 'OSRM';
+  updatedAt: number;
+}
+
 export interface RouteRecord {
   source: RouteSource;
   routeVersion: number;

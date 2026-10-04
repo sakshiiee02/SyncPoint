@@ -12,6 +12,8 @@ export const Paths = {
   member: (journeyId: string, uid: string) => `journeys/${journeyId}/members/${uid}`,
   live: (journeyId: string) => `journeys/${journeyId}/live`,
   liveOf: (journeyId: string, uid: string) => `journeys/${journeyId}/live/${uid}`,
+  routes: (journeyId: string) => `journeys/${journeyId}/routes`,
+  routeOf: (journeyId: string, uid: string) => `journeys/${journeyId}/routes/${uid}`,
   chat: (journeyId: string) => `journeys/${journeyId}/chat`,
   chatMessage: (journeyId: string, messageId: string) =>
     `journeys/${journeyId}/chat/${messageId}`,

@@ -9,6 +9,7 @@ import {
   joinJourney,
   leaveJourney,
   startTraveling,
+  updateMascot,
 } from '@/data/journeyRepository';
 import { resolveResumableJourney } from '@/data/userJourneyRepository';
 import { JourneyError } from '@/data/errors';
@@ -16,6 +17,7 @@ import { getFirebaseDb } from '@/services/firebase/firebaseApp';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useProfileStore } from '@/store/useProfileStore';
 import { OriginLocation, TravelerState, UserProfile } from '@/types/member';
+import { Mascot } from '@/domain/mascot';
 import { journeySession } from './journeySession';
 
 /**
@@ -133,4 +135,12 @@ export async function endJourneyAction(): Promise<void> {
 export function discardLocalJourney(): void {
   journeySession.stop();
   useJourneyStore.getState().resetJourney();
+}
+
+/** After the mascot is edited in the profile: show the new one to friends in the current journey, if any. */
+export async function shareMascotWithJourney(mascot: Mascot): Promise<void> {
+  const journeyId = useJourneyStore.getState().activeJourneyId;
+  const uid = useProfileStore.getState().uid;
+  if (!journeyId || !uid) return;
+  await updateMascot(getFirebaseDb(), journeyId, uid, mascot);
 }

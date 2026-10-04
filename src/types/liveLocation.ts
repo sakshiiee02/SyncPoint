@@ -1,5 +1,6 @@
 import { QuickStatusType } from './status';
 import { TravelerState, TravelMode } from './member';
+import { Mascot } from '@/domain/mascot';
 
 export type MotionState = 'FAST' | 'NORMAL' | 'SLOW' | 'STATIONARY';
 
@@ -41,6 +42,9 @@ export interface ParticipantLiveState {
   phone: string;
   photoUrl?: string;
   isLocalUser: boolean;
+  /** Seat number: gives each traveler a stable colour on every phone. */
+  seat: number;
+  mascot: Mascot;
 
   travelerState: TravelerState;
   travelMode: TravelMode;

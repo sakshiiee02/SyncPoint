@@ -3,7 +3,9 @@ import { ArrivalDetector } from '@/domain/arrival';
 import { PaceTracker, estimateEtaEpochMs } from '@/domain/eta';
 import { getLocalStore } from '@/db/sqliteClient';
 import { isOnline, onReconnect } from '@/services/connectivity';
-import { publishLiveLocation } from '@/services/firebase/liveLocationService';
+import { publishLiveLocation, publishSharedRoute } from '@/services/firebase/liveLocationService';
+import { toSharedRoute } from '@/domain/routeSharing';
+import { RouteRecord } from '@/types/route';
 import { saveLocalJourneyHistory } from '@/services/firebase/historyService';
 import {
   LocationBridge,
@@ -69,6 +71,8 @@ class TrackingController {
   private routeVersion = 1;
   private history: HistoryPoint[] = [];
   private lastHistoryPoint: HistoryPoint | null = null;
+  /** The shared route, kept so it can be re-sent after a reconnect. */
+  private sharedRoute: RouteRecord | null = null;
 
   get isRunning(): boolean {
     return this.ctx !== null;
@@ -94,6 +98,7 @@ class TrackingController {
     this.routeVersion = 1;
     this.history = [];
     this.lastHistoryPoint = null;
+    this.sharedRoute = null;
 
     voiceGuidance.reset();
     useNavigationStore.getState().resetNavigation();
@@ -112,7 +117,12 @@ class TrackingController {
     this.cleanups.push(LocationBridge.addStatusListener((status) => this.onNativeStatus(status)));
     this.cleanups.push(journeySession.addEndedListener(() => this.stop({ saveHistory: true })));
     // After an outage, share where we are *now* (stale positions are never replayed).
-    this.cleanups.push(onReconnect(() => void this.publishNow(true).catch(() => undefined)));
+    this.cleanups.push(
+      onReconnect(() => {
+        void this.publishNow(true).catch(() => undefined);
+        void this.publishRoute().catch(() => undefined);
+      })
+    );
     if (ctx.startPaused) LocationBridge.pauseTracking().catch(() => undefined);
 
     // Resume from what survived on disk if the app was killed mid-trip: the route (so navigation
@@ -124,7 +134,11 @@ class TrackingController {
         store.getTrackPoints(ctx.journeyId),
       ]);
       if (this.ctx !== ctx) return;
-      if (cached) useNavigationStore.getState().setActiveRoute(cached);
+      if (cached) {
+        useNavigationStore.getState().setActiveRoute(cached);
+        this.sharedRoute = cached;
+        void this.publishRoute().catch(() => undefined);
+      }
       if (points.length > 0) {
         this.history = points;
         this.lastHistoryPoint = points[points.length - 1];
@@ -289,7 +303,10 @@ class TrackingController {
         destinationName: ctx.destination.displayName,
       });
       if (this.ctx !== ctx) return;
-      useNavigationStore.getState().setActiveRoute({ ...route, routeVersion: this.routeVersion });
+      const versioned = { ...route, routeVersion: this.routeVersion };
+      useNavigationStore.getState().setActiveRoute(versioned);
+      this.sharedRoute = versioned;
+      void this.publishRoute().catch(() => undefined);
       this.canonicalHint = undefined;
       await getLocalStore().then((store) => store.cacheRoute(ctx.journeyId, route));
     } catch (error) {
@@ -385,6 +402,18 @@ class TrackingController {
       await publishLiveLocation(ctx.journeyId, ctx.uid, record);
     } catch (error) {
       console.warn('[Tracking] publish failed:', (error as Error)?.message);
+    }
+  }
+
+  /** Shares the route with the group so friends can see where this traveler is heading. */
+  private async publishRoute(): Promise<void> {
+    const ctx = this.ctx;
+    const route = this.sharedRoute;
+    if (!ctx || !route || route.source === 'ESTIMATE' || !isOnline()) return;
+    try {
+      await publishSharedRoute(ctx.journeyId, ctx.uid, toSharedRoute(route));
+    } catch (error) {
+      console.warn('[Tracking] could not share route:', (error as Error)?.message);
     }
   }
 

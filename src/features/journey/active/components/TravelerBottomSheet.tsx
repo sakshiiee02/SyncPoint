@@ -9,6 +9,8 @@ import {
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance, formatDuration } from '@/utils/geoMath';
 import { travelerStateLabel } from '@/domain/travelerState';
+import { routeColorFor } from '@/domain/routeSharing';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
 import { PlayIcon, PauseIcon, RouteIcon, ChatIcon } from '@/components/common/Icons';
 
 interface TravelerBottomSheetProps {
@@ -118,11 +120,14 @@ export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
                   (state === 'PAUSED' || state === 'WAITING') && styles.pausedAvatar,
                 ]}
               >
-                <Text style={styles.avatarText}>{p.name.charAt(0).toUpperCase()}</Text>
+                <MascotAvatar mascot={p.mascot} size={38} />
               </View>
 
               <View style={styles.travelerInfo}>
                 <View style={styles.nameRow}>
+                  {!p.isLocalUser && (
+                    <View style={[styles.colorDot, { backgroundColor: routeColorFor(p.seat) }]} />
+                  )}
                   <Text style={styles.travelerName}>
                     {p.name} {p.isLocalUser ? '(You)' : ''}
                   </Text>
@@ -318,6 +323,11 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     alignItems: 'flex-end',
+  },
+  colorDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
   },
   waitingText: {
     fontSize: 12,

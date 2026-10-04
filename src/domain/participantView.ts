@@ -1,6 +1,7 @@
 import { LiveLocationRecord, ParticipantLiveState } from '@/types/liveLocation';
 import { JourneyMember, hasCoordinates, isTravelingState } from '@/types/member';
 import { QuickStatusType } from '@/types/status';
+import { defaultMascot } from './mascot';
 
 /** What this device knows about its own traveler, fresher than anything round-tripped via Firebase. */
 export interface SelfTelemetry {
@@ -44,6 +45,8 @@ export function buildParticipantViews(input: ParticipantViewInput): ParticipantL
         phone: member.phone,
         photoUrl: member.photoUrl,
         isLocalUser,
+        seat: member.seat,
+        mascot: member.mascot ?? defaultMascot(member.uid),
         travelerState: state,
         travelMode: member.travelMode,
         originLabel: member.origin.displayName,

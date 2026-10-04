@@ -269,6 +269,20 @@ export async function joinJourney(
   throw new JourneyError('JOURNEY_FULL');
 }
 
+/** Updates the caller's mascot in a journey they belong to (allowed at any time). */
+export async function updateMascot(
+  db: Database,
+  journeyId: string,
+  uid: string,
+  mascot: { animal: string; color: string }
+): Promise<void> {
+  try {
+    await write(db, { [`${Paths.member(journeyId, uid)}/mascot`]: mascot });
+  } catch (error) {
+    throw toJourneyError(error);
+  }
+}
+
 /** Lets a traveler change origin / travel mode — only possible until they press Start. */
 export async function updateTravelerSetup(
   db: Database,
@@ -403,6 +417,7 @@ export async function finishTraveler(
     [`${Paths.member(journeyId, uid)}/state`]: next,
     [`${Paths.member(journeyId, uid)}/finishedAt`]: serverNow(db),
     [Paths.liveOf(journeyId, uid)]: null,
+    [Paths.routeOf(journeyId, uid)]: null,
     [Paths.userJourney(uid)]: null,
   };
   if (journeyCompleted) updates[`${Paths.meta(journeyId)}/status`] = 'COMPLETED';
@@ -432,6 +447,7 @@ export async function leaveJourney(db: Database, journeyId: string, uid: string)
       updates[Paths.member(journeyId, uid)] = null;
       updates[Paths.seat(journeyId, me.seat)] = null;
       updates[Paths.liveOf(journeyId, uid)] = null;
+      updates[Paths.routeOf(journeyId, uid)] = null;
 
       if (meta.creatorUid === uid && !isTerminalJourneyStatus(meta.status)) {
         const next = pickNextCreator(members, uid);
@@ -468,6 +484,7 @@ export async function removeMember(
       [Paths.member(journeyId, targetUid)]: null,
       [Paths.seat(journeyId, target.seat)]: null,
       [Paths.liveOf(journeyId, targetUid)]: null,
+      [Paths.routeOf(journeyId, targetUid)]: null,
     });
   } catch (error) {
     throw toJourneyError(error);
@@ -486,7 +503,10 @@ export async function endJourney(db: Database, journeyId: string, actorUid: stri
     [Paths.userJourney(actorUid)]: null,
   };
   if (meta.joinCode) updates[Paths.joinCode(meta.joinCode)] = null;
-  for (const memberUid of Object.keys(members)) updates[Paths.liveOf(journeyId, memberUid)] = null;
+  for (const memberUid of Object.keys(members)) {
+    updates[Paths.liveOf(journeyId, memberUid)] = null;
+    updates[Paths.routeOf(journeyId, memberUid)] = null;
+  }
 
   try {
     await write(db, updates);

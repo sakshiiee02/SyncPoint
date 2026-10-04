@@ -11,6 +11,7 @@ import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance, formatDuration } from '@/utils/geoMath';
 import { formatRecency, formatETA } from '@/utils/timeFormat';
 import { travelerStateLabel } from '@/domain/travelerState';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
 import {
   CloseIcon,
   PhoneIcon,
@@ -83,6 +84,7 @@ export const TravelerDetailCard: React.FC<TravelerDetailCardProps> = ({
     <View style={styles.cardContainer}>
       {/* Top Header */}
       <View style={styles.header}>
+        <MascotAvatar mascot={participant.mascot} size={44} />
         <View style={styles.titleBlock}>
           <Text style={styles.travelerName}>
             {name} {isLocalUser ? '(You)' : ''}

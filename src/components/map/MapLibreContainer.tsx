@@ -9,12 +9,22 @@ import { TravelerMarker } from './TravelerMarker';
 // Inform MapLibre that no proprietary token is required
 MapLibreGL.setAccessToken(null);
 
+export interface SharedRouteLine {
+  uid: string;
+  color: string;
+  coordinates: Array<[number, number]>;
+  /** Selected traveler (or overview mode): drawn bolder than the rest. */
+  emphasized: boolean;
+}
+
 interface MapLibreContainerProps {
   destination: Destination;
   participants: ParticipantLiveState[];
   selectedParticipantUid: string | null;
   onSelectParticipant: (uid: string) => void;
   routeCoordinates?: Array<[number, number]>;
+  /** Other travelers' routes, drawn beneath the local route. */
+  sharedRoutes?: SharedRouteLine[];
   isOverviewMode?: boolean;
   children?: React.ReactNode;
 }
@@ -36,6 +46,7 @@ export const MapLibreContainer: React.FC<MapLibreContainerProps> = ({
   selectedParticipantUid,
   onSelectParticipant,
   routeCoordinates,
+  sharedRoutes = [],
   isOverviewMode = false,
   children,
 }) => {
@@ -81,6 +92,32 @@ export const MapLibreContainer: React.FC<MapLibreContainerProps> = ({
           animationMode="easeTo"
           animationDuration={800}
         />
+
+        {/* Friends' routes: subordinate to yours, bolder when selected or in overview */}
+        {sharedRoutes.map((line) =>
+          line.coordinates.length >= 2 ? (
+            <MapLibreGL.ShapeSource
+              key={`shared-${line.uid}`}
+              id={`sharedRouteSource-${line.uid}`}
+              shape={{
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: line.coordinates },
+                properties: {},
+              }}
+            >
+              <MapLibreGL.LineLayer
+                id={`sharedRouteLine-${line.uid}`}
+                style={{
+                  lineColor: line.color,
+                  lineWidth: line.emphasized ? 5 : 3,
+                  lineOpacity: line.emphasized || isOverviewMode ? 0.85 : 0.5,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            </MapLibreGL.ShapeSource>
+          ) : null
+        )}
 
         {/* Route Polyline */}
         {routeGeoJson && (

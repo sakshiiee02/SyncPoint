@@ -4,6 +4,7 @@ import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance } from '@/utils/geoMath';
 import { formatRecency } from '@/utils/timeFormat';
 import { AlertTriangleIcon } from '@/components/common/Icons';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
 
 interface TravelerMarkerProps {
   participant: ParticipantLiveState;
@@ -35,7 +36,6 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
     if (distanceRemainingM === null) return 'Locating...';
     return `${formatDistance(distanceRemainingM)} • ${isMoving ? `${speedKmh} km/h` : 'Stopped'}`;
   })();
-  const initial = name ? name.charAt(0).toUpperCase() : '?';
 
   return (
     <View
@@ -76,7 +76,7 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
             ]}
           />
         )}
-        <Text style={styles.initialText}>{initial}</Text>
+        <MascotAvatar mascot={participant.mascot} size={isLocalUser ? 40 : 36} />
       </View>
 
       {/* Stale Warning Badge (Vector Icon, Zero Emojis) */}
@@ -132,9 +132,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   markerCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#334155',
     borderWidth: 2.5,
     borderColor: '#ffffff',
@@ -142,6 +142,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   localMarkerCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#2563eb',
     borderColor: '#ffffff',
     borderWidth: 3,

@@ -9,6 +9,15 @@ import {
   ScrollView,
 } from 'react-native';
 import { useProfileStore } from '@/store/useProfileStore';
+import { shareMascotWithJourney } from '@/session/journeyActions';
+import { MascotAvatar } from '@/components/common/MascotAvatar';
+import {
+  MASCOT_ANIMALS,
+  MASCOT_COLORS,
+  MASCOT_LABELS,
+  Mascot,
+  defaultMascot,
+} from '@/domain/mascot';
 
 interface ProfileScreenProps {
   onSaved?: () => void;
@@ -16,11 +25,14 @@ interface ProfileScreenProps {
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLaunch }) => {
-  const { profile, saveProfile } = useProfileStore();
+  const { profile, uid, saveProfile } = useProfileStore();
 
   const [name, setName] = useState(profile?.name || '');
   const [username, setUsername] = useState(profile?.username || '');
   const [phone, setPhone] = useState(profile?.phone || '');
+  const [mascot, setMascot] = useState<Mascot>(
+    profile?.mascot ?? defaultMascot(uid ?? username ?? 'traveler')
+  );
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -36,22 +48,60 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
       return;
     }
 
-    saveProfile(name, username, phone);
+    saveProfile(name, username, phone, mascot);
+    // If you're in a journey right now, your friends see the new mascot straight away.
+    shareMascotWithJourney(mascot).catch(() => undefined);
     Alert.alert('Profile Saved', 'Your traveler profile is ready.', [
       { text: 'Continue', onPress: () => onSaved?.() },
     ]);
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
         <Text style={styles.title}>{isFirstLaunch ? 'Welcome to SyncPoint' : 'Your Traveler Profile'}</Text>
         <Text style={styles.subtitle}>
-          No passwords or email needed. Just set your travel handle and contact info for your convoy.
+          No passwords or email needed. Make your mascot, your friends will spot you with it on the map.
         </Text>
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.label}>Your Mascot</Text>
+        <View style={styles.mascotPreviewRow}>
+          <MascotAvatar mascot={mascot} size={96} />
+          <Text style={styles.mascotName}>{MASCOT_LABELS[mascot.animal]}</Text>
+        </View>
+
+        <View style={styles.mascotGrid}>
+          {MASCOT_ANIMALS.map((animal) => (
+            <TouchableOpacity
+              key={animal}
+              style={[styles.mascotOption, mascot.animal === animal && styles.mascotOptionSelected]}
+              onPress={() => setMascot({ ...mascot, animal })}
+              activeOpacity={0.8}
+              accessibilityLabel={MASCOT_LABELS[animal]}
+            >
+              <MascotAvatar mascot={{ animal, color: mascot.color }} size={46} />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.label}>Background Colour</Text>
+        <View style={styles.colorRow}>
+          {MASCOT_COLORS.map((color) => (
+            <TouchableOpacity
+              key={color}
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: color },
+                mascot.color === color && styles.colorSwatchSelected,
+              ]}
+              onPress={() => setMascot({ ...mascot, color })}
+              activeOpacity={0.8}
+            />
+          ))}
+        </View>
+
         <Text style={styles.label}>Display Name</Text>
         <TextInput
           style={styles.input}
@@ -82,7 +132,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
           keyboardType="phone-pad"
         />
 
-        {/* Explicit Phone Disclosure from Section 5.3 & 16.4 */}
         <View style={styles.disclosureBox}>
           <Text style={styles.disclosureTitle}>Phone Number Visibility</Text>
           <Text style={styles.disclosureText}>
@@ -143,6 +192,47 @@ const styles = StyleSheet.create({
     fontSize: 15,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+  },
+  mascotPreviewRow: {
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  mascotName: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  mascotGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  mascotOption: {
+    padding: 3,
+    borderRadius: 30,
+    borderWidth: 2.5,
+    borderColor: 'transparent',
+  },
+  mascotOptionSelected: {
+    borderColor: '#2563eb',
+  },
+  colorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  colorSwatch: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2.5,
+    borderColor: '#ffffff',
+    elevation: 1,
+  },
+  colorSwatchSelected: {
+    borderColor: '#2563eb',
   },
   disclosureBox: {
     backgroundColor: '#eff6ff',

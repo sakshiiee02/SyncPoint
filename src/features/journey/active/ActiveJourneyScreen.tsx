@@ -21,7 +21,8 @@ import { resumeTrackingIfNeeded, stopTracking } from '@/tracking/journeyTracking
 import { trackingController } from '@/tracking/trackingController';
 import { getRoute } from '@/services/routing';
 import { broadcastQuickStatus } from '@/services/firebase/statusService';
-import { MapLibreContainer } from '@/components/map/MapLibreContainer';
+import { MapLibreContainer, SharedRouteLine } from '@/components/map/MapLibreContainer';
+import { routeColorFor, sharedRouteCoordinates } from '@/domain/routeSharing';
 import { RecenterButton } from '@/components/map/RecenterButton';
 import { BackIcon } from '@/components/common/Icons';
 import { formatDistance } from '@/utils/geoMath';
@@ -54,6 +55,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
   const members = useJourneyStore((s) => s.members);
   const uid = useProfileStore((s) => s.uid);
   const locations = useLiveLocationStore((s) => s.locations);
+  const sharedRoutes = useLiveLocationStore((s) => s.routes);
   const selectedTravelerUid = useLiveLocationStore((s) => s.selectedTravelerUid);
   const setSelectedTravelerUid = useLiveLocationStore((s) => s.setSelectedTravelerUid);
   const tracking = useTrackingStore();
@@ -102,6 +104,19 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
       tracking.status,
       nowMs,
     ]
+  );
+  // Friends' routes, decoded once per change (not on every GPS tick).
+  const friendRoutes = useMemo<SharedRouteLine[]>(
+    () =>
+      Object.entries(sharedRoutes)
+        .filter(([routeUid]) => routeUid !== uid && members[routeUid])
+        .map(([routeUid, shared]) => ({
+          uid: routeUid,
+          color: routeColorFor(members[routeUid].seat),
+          coordinates: sharedRouteCoordinates(shared),
+          emphasized: routeUid === selectedTravelerUid,
+        })),
+    [sharedRoutes, members, uid, selectedTravelerUid]
   );
   const localParticipant = participants.find((p) => p.isLocalUser);
   const selectedParticipant = participants.find((p) => p.uid === selectedTravelerUid);
@@ -222,6 +237,7 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
         selectedParticipantUid={selectedTravelerUid}
         onSelectParticipant={(id) => setSelectedTravelerUid(id)}
         routeCoordinates={nav.activeRoute?.geometry?.coordinates}
+        sharedRoutes={friendRoutes}
         isOverviewMode={isOverviewMode}
       >
         <View style={styles.topOverlay} pointerEvents="box-none">

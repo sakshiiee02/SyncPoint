@@ -1,3 +1,5 @@
+import { Mascot } from '@/domain/mascot';
+
 export type TravelMode = 'CAR' | 'BIKE' | 'WALK';
 
 /**
@@ -49,6 +51,8 @@ export interface UserProfile {
   username: string;
   phone: string;
   photoUrl?: string;
+  /** The traveler's mascot, chosen in their profile. */
+  mascot?: Mascot;
 }
 
 /** Member record stored at journeys/{journeyId}/members/{uid}. Visible to members only. */

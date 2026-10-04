@@ -18,6 +18,7 @@ import {
 import { buildAppLink, buildInviteLink, parseInviteCode } from '@/domain/inviteLink';
 import { memberFromDb, memberToDb, stripUndefined } from '@/data/serialization';
 import { findMissingFirebaseSettings } from '@/config/env';
+import { defaultMascot } from '@/domain/mascot';
 import { TRAVELER_STATES, JourneyMember } from '@/types/member';
 
 describe('join codes', () => {
@@ -165,7 +166,7 @@ describe('RTDB serialization', () => {
 
   it('round-trips a member', () => {
     const back = memberFromDb('u1', memberToDb(member) as any);
-    assert.deepEqual(back, { ...member, photoUrl: undefined });
+    assert.deepEqual(back, { ...member, photoUrl: undefined, mascot: defaultMascot('u1') });
   });
 
   it('strips undefined/null but keeps zero and false', () => {

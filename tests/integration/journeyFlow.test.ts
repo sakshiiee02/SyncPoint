@@ -12,6 +12,7 @@ import {
   lookupJourneyByCode,
   removeMember,
   startTraveling,
+  updateMascot,
 } from '@/data/journeyRepository';
 import { resolveResumableJourney } from '@/data/userJourneyRepository';
 import { Paths } from '@/data/paths';
@@ -374,6 +375,94 @@ describe('leave / hand-off / end / finish', () => {
     const lastDone = await finishTraveler(friend.db, meta.journeyId, friend.uid);
     assert.equal(lastDone.journeyCompleted, true);
     assert.equal((await readMeta(host, meta.journeyId)).status, 'COMPLETED');
+  });
+});
+
+describe('shared routes', () => {
+  const sharedRoute = (overrides: Record<string, unknown> = {}) => ({
+    polyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+    distanceM: 310000,
+    durationS: 11700,
+    version: 1,
+    source: 'ORS',
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  });
+
+  it('lets a traveler share their route and friends read it; strangers cannot', async () => {
+    const host = await newUser('RouteHost');
+    const friend = await newUser('RoutePal');
+    const stranger = await newUser('RouteStranger');
+    const { meta } = await setupJourney(host);
+    await join(friend, meta.journeyId);
+    await startTraveling(host.db, meta.journeyId, host.uid);
+
+    await set(ref(host.db, Paths.routeOf(meta.journeyId, host.uid)), sharedRoute());
+    const seen = (await get(ref(friend.db, Paths.routes(meta.journeyId)))).val();
+    assert.equal(seen[host.uid].distanceM, 310000);
+    await rejectsWith(get(ref(stranger.db, Paths.routes(meta.journeyId))), 'permission');
+  });
+
+  it('rejects forged, premature and oversized routes', async () => {
+    const host = await newUser('RouteHost2');
+    const friend = await newUser('RoutePal2');
+    const { meta } = await setupJourney(host);
+    await join(friend, meta.journeyId);
+    await startTraveling(host.db, meta.journeyId, host.uid);
+
+    // A friend cannot write the host's route, nor their own before they have started.
+    await rejectsWith(set(ref(friend.db, Paths.routeOf(meta.journeyId, host.uid)), sharedRoute()), 'permission');
+    await rejectsWith(set(ref(friend.db, Paths.routeOf(meta.journeyId, friend.uid)), sharedRoute()), 'permission');
+    // Too large for the free database.
+    await rejectsWith(
+      set(ref(host.db, Paths.routeOf(meta.journeyId, host.uid)), sharedRoute({ polyline: 'a'.repeat(100001) })),
+      'permission'
+    );
+  });
+
+  it('is removed when the traveler finishes', async () => {
+    const host = await newUser('RouteHost3');
+    const { meta } = await setupJourney(host);
+    await startTraveling(host.db, meta.journeyId, host.uid);
+    await set(ref(host.db, Paths.routeOf(meta.journeyId, host.uid)), sharedRoute());
+    await finishTraveler(host.db, meta.journeyId, host.uid);
+    assert.equal((await get(ref(host.db, Paths.routeOf(meta.journeyId, host.uid)))).exists(), false);
+  });
+});
+
+describe('mascots', () => {
+  it('are stored with the member, visible to friends and changeable at any time', async () => {
+    const host = await newUser('MascotHost');
+    const friend = await newUser('MascotPal');
+    const { meta } = await createJourney(host.db, { ...host.profile, mascot: { animal: 'BEAR', color: '#fecaca' } }, {
+      name: 'Mascot Trip',
+      destination: GOA,
+      expiryHours: 24,
+      origin: DELHI_GPS,
+      travelMode: CAR,
+    });
+    await joinJourney(friend.db, { ...friend.profile, mascot: { animal: 'OWL', color: '#e9d5ff' } }, meta.journeyId, {
+      origin: JAIPUR,
+      travelMode: CAR,
+    });
+
+    const members = (await get(ref(host.db, Paths.members(meta.journeyId)))).val();
+    assert.equal(members[host.uid].mascot.animal, 'BEAR');
+    assert.equal(members[friend.uid].mascot.color, '#e9d5ff');
+
+    await startTraveling(host.db, meta.journeyId, host.uid);
+    await updateMascot(host.db, meta.journeyId, host.uid, { animal: 'FROG', color: '#bbf7d0' });
+    assert.equal((await get(ref(friend.db, `${Paths.member(meta.journeyId, host.uid)}/mascot/animal`))).val(), 'FROG');
+  });
+
+  it('reject invented animals, bad colours and edits to another traveler mascot', async () => {
+    const host = await newUser('MascotHost2');
+    const friend = await newUser('MascotPal2');
+    const { meta } = await setupJourney(host);
+    await join(friend, meta.journeyId);
+    await rejectsWith(updateMascot(host.db, meta.journeyId, host.uid, { animal: 'DRAGON', color: '#ffffff' }), 'allowed');
+    await rejectsWith(updateMascot(host.db, meta.journeyId, host.uid, { animal: 'CAT', color: 'red' }), 'allowed');
+    await rejectsWith(updateMascot(friend.db, meta.journeyId, host.uid, { animal: 'CAT', color: '#ffffff' }), 'allowed');
   });
 });
 

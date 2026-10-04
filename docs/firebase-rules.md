@@ -12,8 +12,9 @@ The rules are verified by `npm run test:integration` (real rules, local emulator
 /journeys/{journeyId}/
     meta       { name, status, creatorUid, joinCode, createdAt, startedAt?, expiresAt, destination, schemaVersion }
     seats/{0..9}   uid                                                 the member cap, see below
-    members/{uid}  { name, username, phone, photoUrl?, seat, origin, travelMode, state, joinedAt, startedAt?, finishedAt? }
+    members/{uid}  { name, username, phone, photoUrl?, mascot{animal,color}, seat, origin, travelMode, state, joinedAt, startedAt?, finishedAt? }
     live/{uid}     { lat, lng, heading, speedMps, batteryPct, charging?, status, lastUpdatedAt, currentRoad, ... }
+    routes/{uid}   { polyline, distanceM, durationS, version, source, updatedAt }   shared so friends can draw it
     chat/{messageId}
 ```
 
@@ -29,6 +30,7 @@ The rules are verified by `npm run test:integration` (real rules, local emulator
 | `journeys/{id}/seats/{n}` | any signed-in user | claim an **empty** seat for yourself (must come with your member record); release your own; creator may free any |
 | `journeys/{id}/members` | members only | own record only; seat/joinedAt immutable; state may only follow WAITING→TRAVELING⇄PAUSED→ARRIVED→FINISHED; origin/mode frozen after start; creator may remove members |
 | `journeys/{id}/live/{uid}` | members only | own record only, only while the journey is ACTIVE, not expired, and the member is TRAVELING/PAUSED/ARRIVED; fields range-checked; own/creator may delete |
+| `journeys/{id}/routes/{uid}` | members only | own record only, while the journey is LOBBY/ACTIVE and the member is on the road; polyline capped at 100 KB; own/creator may delete |
 | `journeys/{id}/chat/{msg}` | members only | members, as themselves, write-once, journey LOBBY/ACTIVE |
 
 Everything else is denied (`.read`/`.write` default to `false`).
