@@ -8,16 +8,38 @@ import {
 } from 'react-native';
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance, formatDuration } from '@/utils/geoMath';
+import { travelerStateLabel } from '@/domain/travelerState';
+import { PlayIcon, PauseIcon, RouteIcon, ChatIcon } from '@/components/common/Icons';
 
 interface TravelerBottomSheetProps {
   participants: ParticipantLiveState[];
   selectedUid: string | null;
   onSelectParticipant: (uid: string) => void;
   isSharingPaused: boolean;
+  /** Pause/Resume only makes sense while the local traveler is on the road. */
+  canTogglePause: boolean;
   onTogglePauseSharing: () => void;
   onOpenChat: () => void;
   onOpenOfflineMap: () => void;
   onFinishJourney: () => void;
+  isHost?: boolean;
+  nowMs: number;
+}
+
+function batteryLabel(p: ParticipantLiveState): string {
+  if (p.batteryPct === null) return 'Battery --';
+  return `Battery ${p.batteryPct}%${p.charging ? ' (charging)' : ''}`;
+}
+
+function subtitle(p: ParticipantLiveState): string {
+  switch (p.travelerState) {
+    case 'WAITING':
+      return `From ${p.originLabel}`;
+    case 'FINISHED':
+      return 'Trip finished';
+    default:
+      return `${p.currentRoad || 'On route'} • ${batteryLabel(p)}`;
+  }
 }
 
 export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
@@ -25,49 +47,58 @@ export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
   selectedUid,
   onSelectParticipant,
   isSharingPaused,
+  canTogglePause,
   onTogglePauseSharing,
   onOpenChat,
   onOpenOfflineMap,
   onFinishJourney,
+  isHost,
+  nowMs,
 }) => {
   return (
     <View style={styles.sheetContainer}>
-      {/* Handle Bar */}
       <View style={styles.handleBar} />
 
-      {/* Quick Controls Bar */}
       <View style={styles.quickControls}>
-        <TouchableOpacity
-          style={[styles.pauseButton, isSharingPaused && styles.pauseButtonActive]}
-          onPress={onTogglePauseSharing}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.pauseButtonText}>
-            {isSharingPaused ? '▶️ Resume' : '⏸️ Pause'}
-          </Text>
+        {canTogglePause && (
+          <TouchableOpacity
+            style={[styles.controlBtn, isSharingPaused && styles.controlBtnWarning]}
+            onPress={onTogglePauseSharing}
+            activeOpacity={0.8}
+          >
+            {isSharingPaused ? (
+              <PlayIcon size={14} color="#d97706" />
+            ) : (
+              <PauseIcon size={14} color="#334155" />
+            )}
+            <Text style={[styles.controlBtnText, isSharingPaused && styles.controlBtnWarningText]}>
+              {isSharingPaused ? 'Resume' : 'Pause'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity style={styles.controlBtn} onPress={onOpenOfflineMap} activeOpacity={0.8}>
+          <RouteIcon size={14} color="#2563eb" />
+          <Text style={styles.controlBtnText}>Offline</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.offlineButton} onPress={onOpenOfflineMap} activeOpacity={0.8}>
-          <Text style={styles.offlineButtonText}>🗺️ Offline</Text>
+        <TouchableOpacity style={styles.controlBtn} onPress={onOpenChat} activeOpacity={0.8}>
+          <ChatIcon size={14} color="#2563eb" />
+          <Text style={styles.controlBtnText}>Chat</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.chatButton} onPress={onOpenChat} activeOpacity={0.8}>
-          <Text style={styles.chatButtonText}>💬 Chat</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.finishButton} onPress={onFinishJourney} activeOpacity={0.8}>
-          <Text style={styles.finishButtonText}>Finish</Text>
+        <TouchableOpacity style={styles.finishBtn} onPress={onFinishJourney} activeOpacity={0.8}>
+          <Text style={styles.finishBtnText}>{isHost ? 'End' : 'Leave'}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Convoy Travelers List (Section 6.4) */}
-      <Text style={styles.listHeader}>Convoy Travelers ({participants.length})</Text>
+      <Text style={styles.listHeader}>Travelers ({participants.length})</Text>
 
       <ScrollView style={styles.travelerList} showsVerticalScrollIndicator={false}>
         {participants.map((p) => {
           const isSelected = p.uid === selectedUid;
-          const isArrived = p.status === 'BACK_ON_ROUTE' || p.distanceRemainingM < 100;
-          const etaSeconds = Math.max(0, Math.floor((p.etaEpochMs - Date.now()) / 1000));
+          const state = p.travelerState;
+          const onTheRoad = state === 'TRAVELING' || state === 'PAUSED';
 
           return (
             <TouchableOpacity
@@ -80,45 +111,48 @@ export const TravelerBottomSheet: React.FC<TravelerBottomSheetProps> = ({
               onPress={() => onSelectParticipant(p.uid)}
               activeOpacity={0.7}
             >
-              {/* Avatar Initial */}
               <View
                 style={[
                   styles.avatar,
                   p.isLocalUser && styles.localAvatar,
-                  !p.isSharing && styles.pausedAvatar,
+                  (state === 'PAUSED' || state === 'WAITING') && styles.pausedAvatar,
                 ]}
               >
                 <Text style={styles.avatarText}>{p.name.charAt(0).toUpperCase()}</Text>
               </View>
 
-              {/* Traveler Info */}
               <View style={styles.travelerInfo}>
                 <View style={styles.nameRow}>
                   <Text style={styles.travelerName}>
                     {p.name} {p.isLocalUser ? '(You)' : ''}
                   </Text>
-                  {!p.isSharing && (
+                  {state === 'PAUSED' && (
                     <View style={styles.pausedPill}>
                       <Text style={styles.pausedPillText}>PAUSED</Text>
                     </View>
                   )}
                 </View>
-                <Text style={styles.travelerSub}>
-                  {p.currentRoad || 'On route'} • Battery: {p.batteryPct}%
+                <Text style={styles.travelerSub} numberOfLines={1}>
+                  {subtitle(p)}
                 </Text>
               </View>
 
-              {/* Live Distance & ETA */}
               <View style={styles.statsContainer}>
-                {isArrived ? (
+                {state === 'ARRIVED' || state === 'FINISHED' ? (
                   <View style={styles.arrivedBadge}>
-                    <Text style={styles.arrivedText}>ARRIVED</Text>
+                    <Text style={styles.arrivedText}>{travelerStateLabel(state).toUpperCase()}</Text>
                   </View>
-                ) : (
+                ) : state === 'WAITING' ? (
+                  <Text style={styles.waitingText}>{travelerStateLabel(state)}</Text>
+                ) : onTheRoad && p.distanceRemainingM !== null && p.etaEpochMs !== null ? (
                   <>
-                    <Text style={styles.etaText}>{formatDuration(etaSeconds)}</Text>
+                    <Text style={styles.etaText}>
+                      {formatDuration(Math.max(0, Math.floor((p.etaEpochMs - nowMs) / 1000)))}
+                    </Text>
                     <Text style={styles.distanceText}>{formatDistance(p.distanceRemainingM)}</Text>
                   </>
+                ) : (
+                  <Text style={styles.waitingText}>Locating...</Text>
                 )}
               </View>
             </TouchableOpacity>
@@ -135,99 +169,73 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 24,
-    maxHeight: 320,
-    borderTopWidth: 1.5,
-    borderColor: '#1e293b',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 12,
+    maxHeight: 330,
+    borderTopWidth: 1,
+    borderColor: '#e2e8f0',
     zIndex: 25,
   },
   handleBar: {
-    width: 40,
+    width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#334155',
+    backgroundColor: '#cbd5e1',
     alignSelf: 'center',
     marginBottom: 12,
   },
   quickControls: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  pauseButton: {
-    flex: 2,
-    backgroundColor: '#1e293b',
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  pauseButtonActive: {
-    borderColor: '#eab308',
-    backgroundColor: 'rgba(234, 179, 8, 0.15)',
-  },
-  pauseButtonText: {
-    color: '#cbd5e1',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  offlineButton: {
-    flex: 1.3,
-    backgroundColor: '#1e293b',
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  offlineButtonText: {
-    color: '#06b6d4',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  chatButton: {
+  controlBtn: {
     flex: 1.2,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
-  chatButtonText: {
-    color: '#38bdf8',
+  controlBtnWarning: {
+    borderColor: '#fde68a',
+    backgroundColor: '#fffbeb',
+  },
+  controlBtnText: {
+    color: '#0f172a',
     fontSize: 12,
     fontWeight: '700',
   },
-  finishButton: {
-    flex: 1,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ef4444',
+  controlBtnWarningText: {
+    color: '#b45309',
   },
-  finishButtonText: {
-    color: '#f87171',
+  finishBtn: {
+    flex: 1,
+    backgroundColor: '#fef2f2',
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  finishBtnText: {
+    color: '#dc2626',
     fontSize: 12,
     fontWeight: '700',
   },
   listHeader: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#94a3b8',
+    fontWeight: '800',
+    color: '#64748b',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
@@ -238,41 +246,42 @@ const styles = StyleSheet.create({
   travelerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     padding: 10,
     borderRadius: 12,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#f1f5f9',
   },
   localTravelerRow: {
-    borderColor: '#06b6d4',
+    borderColor: '#bfdbfe',
+    backgroundColor: '#eff6ff',
   },
   selectedRow: {
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
-    borderColor: '#38bdf8',
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#1e293b',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f1f5f9',
     borderWidth: 1,
-    borderColor: '#38bdf8',
+    borderColor: '#cbd5e1',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
   },
   localAvatar: {
-    borderColor: '#06b6d4',
-    borderWidth: 2,
+    borderColor: '#2563eb',
+    backgroundColor: '#2563eb',
   },
   pausedAvatar: {
-    borderColor: '#64748b',
+    borderColor: '#cbd5e1',
     opacity: 0.5,
   },
   avatarText: {
-    color: '#ffffff',
+    color: '#0f172a',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -285,18 +294,20 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   travelerName: {
-    color: '#f8fafc',
+    color: '#0f172a',
     fontSize: 14,
     fontWeight: '700',
   },
   pausedPill: {
-    backgroundColor: 'rgba(234, 179, 8, 0.15)',
-    paddingHorizontal: 4,
+    backgroundColor: '#fef3c7',
+    paddingHorizontal: 5,
     paddingVertical: 1,
-    borderRadius: 3,
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: '#fde68a',
   },
   pausedPillText: {
-    color: '#eab308',
+    color: '#b45309',
     fontSize: 9,
     fontWeight: '800',
   },
@@ -308,23 +319,31 @@ const styles = StyleSheet.create({
   statsContainer: {
     alignItems: 'flex-end',
   },
+  waitingText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+  },
   etaText: {
-    color: '#38bdf8',
+    color: '#2563eb',
     fontSize: 14,
     fontWeight: '800',
   },
   distanceText: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 11,
+    fontWeight: '500',
   },
   arrivedBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: '#dcfce7',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
   },
   arrivedText: {
-    color: '#10b981',
+    color: '#16a34a',
     fontSize: 11,
     fontWeight: '800',
   },

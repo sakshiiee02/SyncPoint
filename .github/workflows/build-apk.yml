@@ -1,0 +1,89 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: Typecheck & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run typecheck
+      - run: npm test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Security rules + journey flows against the Firebase emulator
+        run: |
+          npm install -g firebase-tools@14
+          npm run test:integration
+
+  build-apk:
+    name: Build & sign release APK
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - run: npm ci --legacy-peer-deps
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      # Secrets (Settings -> Secrets and variables -> Actions). Nothing here is committed to the repo.
+      - name: Write .env from secrets
+        run: |
+          cat > .env <<EOF
+          EXPO_PUBLIC_FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FIREBASE_DATABASE_URL=${{ secrets.FIREBASE_DATABASE_URL }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
+          GEOAPIFY_API_KEY=${{ secrets.GEOAPIFY_API_KEY }}
+          LOCATIONIQ_API_KEY=${{ secrets.LOCATIONIQ_API_KEY }}
+          OPENROUTESERVICE_API_KEY=${{ secrets.OPENROUTESERVICE_API_KEY }}
+          INVITE_LINK_BASE_URL=${{ secrets.INVITE_LINK_BASE_URL }}
+          EOF
+
+      - name: Write google-services.json from secret
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Decode release keystore
+        run: echo '${{ secrets.RELEASE_KEYSTORE_BASE64 }}' | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - run: chmod +x android/gradlew
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          SYNCPOINT_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          SYNCPOINT_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          SYNCPOINT_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          SYNCPOINT_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SyncPoint-Android-APK
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30

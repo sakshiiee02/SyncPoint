@@ -1,21 +1,29 @@
 import { ref, set, onValue, off, DataSnapshot } from 'firebase/database';
 import { getFirebaseDb } from './firebaseApp';
 import { ChatMessage, MessageType } from '@/types/chat';
-import { syncService } from '@/services/offlineMaps/reconnectSyncService';
+import { getLocalStore } from '@/db/sqliteClient';
+import { Paths } from '@/data/paths';
+import { stripUndefined } from '@/data/serialization';
+import { isOnline } from '../connectivity';
 
-/**
- * Handles journey group chat messaging.
- * Matches Section 14.1 of Developer Handoff.
- */
+export interface SendResult {
+  message: ChatMessage;
+  /** True when offline: saved on the phone and sent automatically once the connection returns. */
+  queued: boolean;
+}
+
+async function writeMessage(journeyId: string, message: ChatMessage): Promise<void> {
+  await set(ref(getFirebaseDb(), Paths.chatMessage(journeyId, message.id)), stripUndefined(message));
+}
+
 export async function sendChatMessage(
   journeyId: string,
   sender: { uid: string; name: string },
   text: string,
   type: MessageType = 'TEXT'
-): Promise<ChatMessage> {
-  const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+): Promise<SendResult> {
   const message: ChatMessage = {
-    id: messageId,
+    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     senderUid: sender.uid,
     senderName: sender.name,
     text: text.trim(),
@@ -23,40 +31,53 @@ export async function sendChatMessage(
     type,
   };
 
-  // If offline, queue locally via syncService
-  const isOnline = await syncService.handleChatMessage(journeyId, message);
-  if (isOnline) {
-    const db = getFirebaseDb();
-    const chatRef = ref(db, `journeys/${journeyId}/chat/${messageId}`);
-    await set(chatRef, message);
+  if (!isOnline()) {
+    await (await getLocalStore()).enqueueChat(journeyId, message);
+    return { message, queued: true };
   }
-
-  return message;
+  await writeMessage(journeyId, message);
+  return { message, queued: false };
 }
 
-/**
- * Realtime listener for group chat messages in an active journey.
- */
+/** Sends everything typed while offline. Safe to call any time; stops quietly if still offline. */
+export async function flushChatOutbox(journeyId: string): Promise<void> {
+  if (!isOnline()) return;
+  const store = await getLocalStore();
+  for (const message of await store.getChatOutbox(journeyId)) {
+    try {
+      await writeMessage(journeyId, message);
+    } catch (error) {
+      // Rejected by the rules (journey ended / removed): this message can never be delivered.
+      if (/permission/i.test(String((error as Error)?.message))) {
+        await store.removeChat(message.id);
+        continue;
+      }
+      return; // transient: try again on the next reconnect
+    }
+    await store.removeChat(message.id);
+  }
+}
+
+export async function getPendingChat(journeyId: string): Promise<ChatMessage[]> {
+  try {
+    return await (await getLocalStore()).getChatOutbox(journeyId);
+  } catch {
+    return [];
+  }
+}
+
+/** Realtime listener for the journey's group chat. */
 export function subscribeToChatMessages(
   journeyId: string,
   onMessagesUpdate: (messages: ChatMessage[]) => void
 ): () => void {
-  const db = getFirebaseDb();
-  const chatPathRef = ref(db, `journeys/${journeyId}/chat`);
+  const chatPathRef = ref(getFirebaseDb(), Paths.chat(journeyId));
 
   const callback = (snapshot: DataSnapshot) => {
-    if (snapshot.exists()) {
-      const data = snapshot.val() as Record<string, ChatMessage>;
-      const messageList = Object.values(data).sort((a, b) => a.timestamp - b.timestamp);
-      onMessagesUpdate(messageList);
-    } else {
-      onMessagesUpdate([]);
-    }
+    const data = snapshot.exists() ? (snapshot.val() as Record<string, ChatMessage>) : {};
+    onMessagesUpdate(Object.values(data).sort((a, b) => a.timestamp - b.timestamp));
   };
 
-  onValue(chatPathRef, callback);
-
-  return () => {
-    off(chatPathRef, 'value', callback);
-  };
+  onValue(chatPathRef, callback, () => onMessagesUpdate([]));
+  return () => off(chatPathRef, 'value', callback);
 }

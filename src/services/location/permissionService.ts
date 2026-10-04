@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform, Alert } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 export interface PermissionStatus {
   hasFineLocation: boolean;
@@ -28,13 +28,8 @@ export async function requestLocationPermissions(): Promise<boolean> {
       }
     );
 
-    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-      Alert.alert(
-        'Location Required',
-        'Precise location is necessary for live mutual tracking and arrival detection. You can enable it in device Settings.'
-      );
-      return false;
-    }
+    // The caller explains what to do next (and can offer to open Settings).
+    if (granted !== PermissionsAndroid.RESULTS.GRANTED) return false;
 
     // 2. Android 13+ Notification Permission for Foreground Service
     if (Platform.Version >= 33) {

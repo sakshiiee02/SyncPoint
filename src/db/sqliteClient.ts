@@ -1,126 +1,35 @@
-import { RouteRecord } from '@/types/route';
-import { LiveLocationRecord } from '@/types/liveLocation';
-import { ChatMessage } from '@/types/chat';
+import { open } from '@op-engineering/op-sqlite';
+import { LocalStore } from './localStore';
+import { SqlDatabase, SqlValue } from './sql';
 
-export interface OfflineLocationItem extends LiveLocationRecord {
-  id: string;
-  journeyId: string;
-  uid: string;
-  isSynced: boolean;
+/** Adapts op-sqlite (SQLite via JSI) to the SqlDatabase interface. */
+function createDeviceDatabase(): SqlDatabase {
+  const db = open({ name: 'syncpoint.db' });
+  return {
+    async run(sql: string, params: SqlValue[] = []) {
+      await db.execute(sql, params);
+    },
+    async all<T>(sql: string, params: SqlValue[] = []) {
+      const result = await db.execute(sql, params);
+      return (result.rows ?? []) as unknown as T[];
+    },
+  };
 }
 
-export interface OfflineChatItem extends ChatMessage {
-  journeyId: string;
-  isSent: boolean;
-}
+let storePromise: Promise<LocalStore> | null = null;
 
-export interface OfflineMapPackRecord {
-  packId: string;
-  journeyId: string;
-  name: string;
-  bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number };
-  sizeBytes: number;
-  downloadedAt: number;
-}
-
-/**
- * Local offline persistence layer.
- * Implements durable storage for routes, unsynced GPS fixes, and queued chat messages.
- * Matches Section 12, 13, and 19 of Developer Handoff.
- */
-class LocalDatabaseClient {
-  private routeStorage: Map<string, RouteRecord> = new Map();
-  private locationBuffer: OfflineLocationItem[] = [];
-  private chatQueue: OfflineChatItem[] = [];
-  private mapPacks: Map<string, OfflineMapPackRecord> = new Map();
-
-  // Route Caching
-  async cacheRoute(journeyId: string, route: RouteRecord): Promise<void> {
-    this.routeStorage.set(journeyId, { ...route, updatedAt: Date.now() });
-  }
-
-  async getCachedRoute(journeyId: string): Promise<RouteRecord | null> {
-    return this.routeStorage.get(journeyId) || null;
-  }
-
-  // Location Buffering
-  async bufferLocation(
-    journeyId: string,
-    uid: string,
-    record: LiveLocationRecord
-  ): Promise<string> {
-    const id = `loc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const item: OfflineLocationItem = {
-      ...record,
-      id,
-      journeyId,
-      uid,
-      isSynced: false,
-    };
-    this.locationBuffer.push(item);
-    return id;
-  }
-
-  async getUnsyncedLocations(journeyId: string): Promise<OfflineLocationItem[]> {
-    return this.locationBuffer.filter(
-      (item) => item.journeyId === journeyId && !item.isSynced
-    );
-  }
-
-  async markLocationsSynced(ids: string[]): Promise<void> {
-    const idSet = new Set(ids);
-    for (const item of this.locationBuffer) {
-      if (idSet.has(item.id)) {
-        item.isSynced = true;
-      }
-    }
-  }
-
-  // Chat Queue
-  async queueChat(journeyId: string, message: ChatMessage): Promise<void> {
-    this.chatQueue.push({
-      ...message,
-      journeyId,
-      isSent: false,
+/** The app-wide local store, opened and migrated on first use. */
+export function getLocalStore(): Promise<LocalStore> {
+  if (!storePromise) {
+    storePromise = (async () => {
+      const store = new LocalStore(createDeviceDatabase());
+      await store.migrate();
+      return store;
+    })();
+    // Allow a retry on the next call if opening failed.
+    storePromise.catch(() => {
+      storePromise = null;
     });
   }
-
-  async getUnsentChat(journeyId: string): Promise<OfflineChatItem[]> {
-    return this.chatQueue.filter(
-      (item) => item.journeyId === journeyId && !item.isSent
-    );
-  }
-
-  async markChatSent(ids: string[]): Promise<void> {
-    const idSet = new Set(ids);
-    for (const item of this.chatQueue) {
-      if (idSet.has(item.id)) {
-        item.isSent = true;
-      }
-    }
-  }
-
-  // Map Pack Management
-  async saveMapPack(pack: OfflineMapPackRecord): Promise<void> {
-    this.mapPacks.set(pack.packId, pack);
-  }
-
-  async getMapPacks(journeyId: string): Promise<OfflineMapPackRecord[]> {
-    return Array.from(this.mapPacks.values()).filter(
-      (p) => p.journeyId === journeyId
-    );
-  }
-
-  async deleteMapPack(packId: string): Promise<void> {
-    this.mapPacks.delete(packId);
-  }
-
-  clearAll() {
-    this.routeStorage.clear();
-    this.locationBuffer = [];
-    this.chatQueue = [];
-    this.mapPacks.clear();
-  }
+  return storePromise;
 }
-
-export const localDb = new LocalDatabaseClient();

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,58 +8,60 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { lookupJourneyByCode } from '@/services/firebase/rtdbService';
-import { JourneyMeta } from '@/types/journey';
+import { lookupJourneyByCode } from '@/data/journeyRepository';
+import { JourneyError } from '@/data/errors';
+import { normalizeJoinCode } from '@/domain/joinCode';
+import { getFirebaseDb } from '@/services/firebase/firebaseApp';
+import { CONFIG } from '@/constants/config';
+import { JourneyPreview } from '@/types/journey';
+import { PinIcon, UserIcon } from '@/components/common/Icons';
 
 interface JoinJourneyScreenProps {
-  onJourneyResolved: (journey: JourneyMeta, code: string) => void;
+  /** Code from an invite link; looked up automatically. */
+  initialCode?: string;
+  onJourneyResolved: (preview: JourneyPreview) => void;
   onCancel: () => void;
 }
 
 export const JoinJourneyScreen: React.FC<JoinJourneyScreenProps> = ({
+  initialCode,
   onJourneyResolved,
   onCancel,
 }) => {
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode ?? '');
   const [isLoading, setIsLoading] = useState(false);
-  const [resolvedJourney, setResolvedJourney] = useState<JourneyMeta | null>(null);
+  const [preview, setPreview] = useState<JourneyPreview | null>(null);
 
-  const handleLookup = async () => {
-    const cleanCode = code.trim().toUpperCase();
-    if (cleanCode.length < 4) {
-      Alert.alert('Code Needed', 'Please enter a valid 6-character journey invite code.');
+  const handleLookup = async (rawCode: string = code) => {
+    const cleanCode = normalizeJoinCode(rawCode);
+    if (cleanCode.length !== CONFIG.JOIN_CODE.LENGTH) {
+      Alert.alert('Code Needed', `Please enter the ${CONFIG.JOIN_CODE.LENGTH}-character journey code.`);
       return;
     }
 
     try {
       setIsLoading(true);
-      const journey = await lookupJourneyByCode(cleanCode);
+      setPreview(await lookupJourneyByCode(getFirebaseDb(), cleanCode));
+    } catch (error) {
+      const message = error instanceof JourneyError ? error.message : 'Could not verify code.';
+      Alert.alert('Cannot Join', message);
+    } finally {
       setIsLoading(false);
-
-      if (!journey) {
-        Alert.alert('Not Found', 'No active journey found with this code. Check the code and try again.');
-        return;
-      }
-
-      setResolvedJourney(journey);
-    } catch (error: any) {
-      setIsLoading(false);
-      Alert.alert('Lookup Error', error?.message || 'Could not verify code.');
     }
   };
 
-  const handleConfirmJoin = () => {
-    if (resolvedJourney) {
-      onJourneyResolved(resolvedJourney, code.trim().toUpperCase());
-    }
-  };
+  // Opened from an invite link: verify straight away.
+  useEffect(() => {
+    if (initialCode) handleLookup(initialCode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode]);
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Join a Journey</Text>
         <Text style={styles.subtitle}>
-          Enter the 6-character short code shared by your trip creator.
+          Enter the {CONFIG.JOIN_CODE.LENGTH}-character code shared by your trip creator.
         </Text>
       </View>
 
@@ -68,20 +70,20 @@ export const JoinJourneyScreen: React.FC<JoinJourneyScreenProps> = ({
         <TextInput
           style={styles.codeInput}
           placeholder="e.g. GOA42K"
-          placeholderTextColor="#64748b"
+          placeholderTextColor="#94a3b8"
           value={code}
           onChangeText={(val: string) => {
             setCode(val.toUpperCase());
-            setResolvedJourney(null);
+            setPreview(null);
           }}
           autoCapitalize="characters"
           maxLength={8}
         />
 
-        {!resolvedJourney ? (
+        {!preview ? (
           <TouchableOpacity
             style={styles.searchButton}
-            onPress={handleLookup}
+            onPress={() => handleLookup()}
             disabled={isLoading}
             activeOpacity={0.8}
           >
@@ -96,20 +98,26 @@ export const JoinJourneyScreen: React.FC<JoinJourneyScreenProps> = ({
             <View style={styles.previewBadge}>
               <Text style={styles.previewBadgeText}>JOURNEY FOUND</Text>
             </View>
-            <Text style={styles.journeyName}>{resolvedJourney.name}</Text>
-            <Text style={styles.destination}>
-              Destination: {resolvedJourney.destination.displayName}
-            </Text>
-            <Text style={styles.memberCount}>
-              Current travelers: {resolvedJourney.memberCount}/10
-            </Text>
+            <Text style={styles.journeyName}>{preview.meta.name}</Text>
+            <View style={styles.detailRow}>
+              <PinIcon size={14} color="#64748b" />
+              <Text style={styles.destination}>
+                {preview.meta.destination.displayName}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <UserIcon size={14} color="#64748b" />
+              <Text style={styles.memberCount}>
+                Current travelers: {preview.seatsTaken}/{CONFIG.MAX_MEMBERS}
+              </Text>
+            </View>
 
             <TouchableOpacity
               style={styles.confirmButton}
-              onPress={handleConfirmJoin}
+              onPress={() => onJourneyResolved(preview)}
               activeOpacity={0.8}
             >
-              <Text style={styles.confirmButtonText}>Continue to Origin Selection →</Text>
+              <Text style={styles.confirmButtonText}>Continue to Origin Selection</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -125,7 +133,7 @@ export const JoinJourneyScreen: React.FC<JoinJourneyScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#f8fafc',
     padding: 20,
     justifyContent: 'center',
   },
@@ -134,46 +142,46 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 26,
-    fontWeight: '700',
-    color: '#f8fafc',
+    fontWeight: '800',
+    color: '#0f172a',
     marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#64748b',
     lineHeight: 20,
   },
   card: {
-    backgroundColor: '#111827',
-    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
     marginBottom: 20,
   },
   label: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#cbd5e1',
+    fontWeight: '700',
+    color: '#0f172a',
     marginBottom: 8,
   },
   codeInput: {
-    backgroundColor: '#1e293b',
-    color: '#38bdf8',
-    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    color: '#2563eb',
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
     letterSpacing: 4,
     textAlign: 'center',
     borderWidth: 1.5,
-    borderColor: '#06b6d4',
+    borderColor: '#2563eb',
     marginBottom: 16,
   },
   searchButton: {
-    backgroundColor: '#06b6d4',
-    borderRadius: 10,
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
@@ -183,17 +191,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   previewBox: {
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
-    borderRadius: 12,
+    backgroundColor: '#eff6ff',
+    borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#06b6d4',
+    borderColor: '#bfdbfe',
   },
   previewBadge: {
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#2563eb',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 4,
+    borderRadius: 6,
     alignSelf: 'flex-start',
     marginBottom: 8,
   },
@@ -205,23 +213,29 @@ const styles = StyleSheet.create({
   },
   journeyName: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#f8fafc',
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 4,
   },
   destination: {
     fontSize: 13,
-    color: '#cbd5e1',
-    marginBottom: 4,
+    color: '#334155',
+    fontWeight: '500',
   },
   memberCount: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: 14,
   },
   confirmButton: {
-    backgroundColor: '#10b981',
-    borderRadius: 8,
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
@@ -237,6 +251,6 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#64748b',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
 });

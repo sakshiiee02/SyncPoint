@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance } from '@/utils/geoMath';
 import { formatRecency } from '@/utils/timeFormat';
+import { AlertTriangleIcon } from '@/components/common/Icons';
 
 interface TravelerMarkerProps {
   participant: ParticipantLiveState;
@@ -19,17 +20,28 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
     isStale,
     lastUpdatedAt,
     heading,
+    travelerState,
+    positionKind,
   } = participant;
 
   const speedKmh = Math.round(speedMps * 3.6);
-  const isMoving = speedKmh >= 3;
+  const isMoving = speedKmh >= 3 && travelerState === 'TRAVELING';
+  const notOnRoad = travelerState === 'WAITING' || positionKind === 'ORIGIN';
+  const dimmed = notOnRoad || travelerState === 'PAUSED';
+  const caption = (() => {
+    if (travelerState === 'WAITING') return 'Not started';
+    if (travelerState === 'PAUSED') return lastUpdatedAt ? `Last seen ${formatRecency(lastUpdatedAt)}` : 'Paused';
+    if (travelerState === 'ARRIVED') return 'Arrived';
+    if (distanceRemainingM === null) return 'Locating...';
+    return `${formatDistance(distanceRemainingM)} • ${isMoving ? `${speedKmh} km/h` : 'Stopped'}`;
+  })();
   const initial = name ? name.charAt(0).toUpperCase() : '?';
 
   return (
     <View
       style={[
         styles.container,
-        !isSharing && styles.pausedContainer,
+        dimmed && styles.pausedContainer,
       ]}
       onTouchEnd={onPress}
     >
@@ -38,17 +50,13 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
         style={[
           styles.callsignBox,
           isLocalUser && styles.localCallsignBox,
-          !isSharing && styles.pausedCallsignBox,
+          dimmed && styles.pausedCallsignBox,
         ]}
       >
         <Text style={[styles.callsignName, isLocalUser && styles.localCallsignText]} numberOfLines={1}>
-          {name} {isLocalUser ? '(You)' : ''} {!isSharing ? '• PAUSED' : ''}
+          {name} {isLocalUser ? '(You)' : ''}
         </Text>
-        <Text style={styles.callsignSub}>
-          {!isSharing
-            ? `Last seen ${formatRecency(lastUpdatedAt)}`
-            : `${formatDistance(distanceRemainingM)} • ${isMoving ? `${speedKmh} km/h` : 'Stopped'}`}
-        </Text>
+        <Text style={styles.callsignSub}>{caption}</Text>
       </View>
 
       {/* Pin / Circle Marker */}
@@ -56,7 +64,7 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
         style={[
           styles.markerCircle,
           isLocalUser && styles.localMarkerCircle,
-          !isSharing && styles.pausedMarkerCircle,
+          dimmed && styles.pausedMarkerCircle,
         ]}
       >
         {/* Heading Indicator pointer if moving */}
@@ -71,10 +79,10 @@ export const TravelerMarker: React.FC<TravelerMarkerProps> = ({ participant, onP
         <Text style={styles.initialText}>{initial}</Text>
       </View>
 
-      {/* Stale Warning Badge */}
-      {isStale && isSharing && (
+      {/* Stale Warning Badge (Vector Icon, Zero Emojis) */}
+      {isStale && isSharing && travelerState === 'TRAVELING' && (
         <View style={styles.staleBadge}>
-          <Text style={styles.staleText}>⚠️</Text>
+          <AlertTriangleIcon size={14} color="#dc2626" />
         </View>
       )}
     </View>
@@ -88,67 +96,59 @@ const styles = StyleSheet.create({
     width: 140,
   },
   pausedContainer: {
-    opacity: 0.45,
+    opacity: 0.5,
   },
   callsignBox: {
-    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
     alignItems: 'center',
     marginBottom: 4,
     minWidth: 90,
     maxWidth: 135,
   },
   localCallsignBox: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   pausedCallsignBox: {
-    borderColor: '#64748b',
+    borderColor: '#cbd5e1',
+    backgroundColor: '#f8fafc',
   },
   callsignName: {
-    color: '#f8fafc',
+    color: '#0f172a',
     fontSize: 11,
     fontWeight: '700',
   },
   localCallsignText: {
-    color: '#38bdf8',
+    color: '#2563eb',
   },
   callsignSub: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 10,
     fontWeight: '500',
   },
   markerCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#3b82f6',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#334155',
     borderWidth: 2.5,
     borderColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 6,
   },
   localMarkerCircle: {
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#2563eb',
     borderColor: '#ffffff',
     borderWidth: 3,
-    shadowColor: '#06b6d4',
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 10,
   },
   pausedMarkerCircle: {
-    backgroundColor: '#64748b',
-    borderColor: '#94a3b8',
+    backgroundColor: '#94a3b8',
+    borderColor: '#e2e8f0',
   },
   headingPointer: {
     position: 'absolute',
@@ -160,19 +160,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 8,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: '#06b6d4',
+    borderBottomColor: '#2563eb',
   },
   initialText: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
   staleBadge: {
     position: 'absolute',
     top: 24,
     right: 36,
-  },
-  staleText: {
-    fontSize: 12,
+    backgroundColor: '#fee2e2',
+    padding: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fca5a5',
   },
 });

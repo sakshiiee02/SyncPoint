@@ -1,70 +1,56 @@
 import { create } from 'zustand';
-import { JourneyMeta, JourneyStatus } from '@/types/journey';
-import { JourneyMember, SharingState } from '@/types/member';
+import { JourneyMeta } from '@/types/journey';
+import { JourneyMember } from '@/types/member';
 
+/** Why the journey the user was in stopped being usable. */
+export type JourneyEndReason = 'COMPLETED' | 'CANCELLED' | 'EXPIRED' | 'REMOVED';
+
+/**
+ * Read-only mirror of the journey the user is currently part of. Only the JourneySession
+ * (and the actions in journeyActions.ts) write to it; screens just read.
+ */
 interface JourneyState {
+  activeJourneyId: string | null;
   currentJourney: JourneyMeta | null;
   members: Record<string, JourneyMember>;
-  activeJoinCode: string | null;
-  isLoading: boolean;
-  error: string | null;
+  /** True once the first members snapshot arrived (before that the roster is unknown). */
+  membersLoaded: boolean;
+  endedReason: JourneyEndReason | null;
 
+  setActiveJourney: (journeyId: string | null) => void;
   setCurrentJourney: (journey: JourneyMeta | null) => void;
   setMembers: (members: Record<string, JourneyMember>) => void;
-  setActiveJoinCode: (code: string | null) => void;
-  setLoading: (isLoading: boolean) => void;
-  setError: (error: string | null) => void;
-  updateMemberSharingState: (uid: string, state: SharingState) => void;
-  updateJourneyStatus: (status: JourneyStatus) => void;
+  patchMember: (uid: string, patch: Partial<JourneyMember>) => void;
+  setEnded: (reason: JourneyEndReason) => void;
   resetJourney: () => void;
 }
 
-export const useJourneyStore = create<JourneyState>((set) => ({
+const EMPTY = {
+  activeJourneyId: null,
   currentJourney: null,
   members: {},
-  activeJoinCode: null,
-  isLoading: false,
-  error: null,
+  membersLoaded: false,
+  endedReason: null,
+} as const;
 
-  setCurrentJourney: (journey) => set({ currentJourney: journey, error: null }),
+export const useJourneyStore = create<JourneyState>((set) => ({
+  ...EMPTY,
 
-  setMembers: (members) => set({ members }),
+  setActiveJourney: (activeJourneyId) => set({ activeJourneyId }),
 
-  setActiveJoinCode: (code) => set({ activeJoinCode: code }),
+  setCurrentJourney: (currentJourney) =>
+    set({ currentJourney, activeJourneyId: currentJourney?.journeyId ?? null }),
 
-  setLoading: (isLoading) => set({ isLoading }),
+  setMembers: (members) => set({ members, membersLoaded: true }),
 
-  setError: (error) => set({ error, isLoading: false }),
-
-  updateMemberSharingState: (uid, sharingState) => {
+  patchMember: (uid, patch) =>
     set((state) => {
       const existing = state.members[uid];
       if (!existing) return state;
-      return {
-        members: {
-          ...state.members,
-          [uid]: { ...existing, sharingState },
-        },
-      };
-    });
-  },
+      return { members: { ...state.members, [uid]: { ...existing, ...patch } } };
+    }),
 
-  updateJourneyStatus: (status) => {
-    set((state) => {
-      if (!state.currentJourney) return state;
-      return {
-        currentJourney: { ...state.currentJourney, status },
-      };
-    });
-  },
+  setEnded: (endedReason) => set({ endedReason }),
 
-  resetJourney: () => {
-    set({
-      currentJourney: null,
-      members: {},
-      activeJoinCode: null,
-      isLoading: false,
-      error: null,
-    });
-  },
+  resetJourney: () => set({ ...EMPTY, members: {} }),
 }));

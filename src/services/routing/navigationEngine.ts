@@ -1,44 +1,31 @@
-import { LatLng, calculateDistanceMeters } from '@/utils/geoMath';
+import { LatLng } from '@/utils/geoMath';
 import { RouteRecord, RouteStep } from '@/types/route';
 import { CONFIG } from '@/constants/config';
+import { indexRoute, projectOntoRoute } from '@/domain/routeProgress';
 
 export interface NavigationProgress {
   currentStepIndex: number;
   currentStep: RouteStep | null;
+  /** Metres until the next manoeuvre, measured along the route. */
   distanceToNextManeuverM: number;
   instruction: string;
   maneuverIcon: string;
   isOffRoute: boolean;
+  /** Metres left to the destination, measured along the route. */
   distanceRemainingM: number;
-  durationRemainingS: number;
+  /** Metres from the start of the route (for the next evaluation's search window). */
+  alongM: number;
+  segmentIndex: number;
+  crossTrackM: number;
+  currentRoad: string;
 }
 
 /**
- * Calculates the shortest distance from a point to a line segment in meters.
- */
-export function distanceToSegmentMeters(p: LatLng, a: LatLng, b: LatLng): number {
-  const dAB = calculateDistanceMeters(a, b);
-  if (dAB === 0) return calculateDistanceMeters(p, a);
-
-  const dAP = calculateDistanceMeters(a, p);
-  const dBP = calculateDistanceMeters(b, p);
-
-  // If projection falls outside segment endpoints
-  if (dAP * dAP >= dBP * dBP + dAB * dAB) return dBP;
-  if (dBP * dBP >= dAP * dAP + dAB * dAB) return dAP;
-
-  // Triangular area / base = perpendicular height
-  const s = (dAB + dAP + dBP) / 2;
-  const area = Math.sqrt(Math.max(0, s * (s - dAB) * (s - dAP) * (s - dBP)));
-  return (2 * area) / dAB;
-}
-
-/**
- * Maps OSRM maneuver type and modifier to a clean visual icon.
+ * Maps a manoeuvre type/modifier to a clean direction glyph.
  */
 export function getManeuverIcon(type: string, modifier?: string): string {
-  if (type === 'arrive') return '🏁';
-  if (type === 'depart') return '🚗';
+  if (type === 'arrive') return 'ARRIVE';
+  if (type === 'depart') return 'DEPART';
 
   switch (modifier) {
     case 'left':
@@ -53,83 +40,62 @@ export function getManeuverIcon(type: string, modifier?: string): string {
       return '↩';
     case 'straight':
     default:
-      return '⬆️';
+      return '↑';
   }
 }
 
+/** Cumulative end distance of each step, rescaled so the last one lines up with the polyline. */
+function stepEndDistances(route: RouteRecord, totalM: number): number[] {
+  const raw: number[] = [];
+  let sum = 0;
+  for (const step of route.steps) {
+    sum += step.distanceM;
+    raw.push(sum);
+  }
+  const scale = sum > 0 ? totalM / sum : 1;
+  return raw.map((d) => d * scale);
+}
+
 /**
- * Evaluates live vehicle progress against the active route geometry.
- * Matches Section 11.2 of Developer Handoff.
+ * Where is the traveler on the route, how far is the next turn, how much route is left, and are
+ * they off it? `hintSegment` (the previous result's segmentIndex) keeps this cheap on long routes.
  */
 export function evaluateNavigationProgress(
   currentLocation: LatLng,
-  route: RouteRecord
+  route: RouteRecord,
+  hintSegment?: number
 ): NavigationProgress {
-  const coords = route.geometry.coordinates; // [lng, lat]
-  let minCrossTrackDistanceM = Infinity;
+  const index = indexRoute(route.geometry.coordinates);
+  const position = projectOntoRoute(index, currentLocation, hintSegment);
+  const distanceRemainingM = Math.max(0, index.totalM - position.alongM);
+  const isOffRoute = position.crossTrackM > CONFIG.ROUTE_REROUTE_THRESHOLD_M;
 
-  // Find minimum perpendicular distance from current point to any segment on the polyline
-  for (let i = 0; i < coords.length - 1; i++) {
-    const a: LatLng = { lat: coords[i][1], lng: coords[i][0] };
-    const b: LatLng = { lat: coords[i + 1][1], lng: coords[i + 1][0] };
-    const distM = distanceToSegmentMeters(currentLocation, a, b);
-    if (distM < minCrossTrackDistanceM) {
-      minCrossTrackDistanceM = distM;
-    }
+  let currentStepIndex = 0;
+  let distanceToNextManeuverM = distanceRemainingM;
+  const steps = route.steps;
+
+  if (steps.length > 0) {
+    const ends = stepEndDistances(route, index.totalM);
+    currentStepIndex = ends.findIndex((end) => end > position.alongM);
+    if (currentStepIndex === -1) currentStepIndex = steps.length - 1;
+    distanceToNextManeuverM = Math.max(0, ends[currentStepIndex] - position.alongM);
   }
 
-  // Detect off-route (Section 11.2: off-route threshold 50-100m, default 75m)
-  const isOffRoute = minCrossTrackDistanceM > CONFIG.ROUTE_REROUTE_THRESHOLD_M;
-
-  // Determine current step and upcoming maneuver
-  let activeStepIndex = 0;
-  const destinationCoord: LatLng = {
-    lat: coords[coords.length - 1][1],
-    lng: coords[coords.length - 1][0],
-  };
-  const distanceRemainingM = calculateDistanceMeters(currentLocation, destinationCoord);
-
-  // Approximate current step based on distance remaining
-  if (route.steps.length > 0) {
-    let distCounter = route.distanceM;
-    for (let i = 0; i < route.steps.length; i++) {
-      distCounter -= route.steps[i].distanceM;
-      if (distanceRemainingM >= distCounter) {
-        activeStepIndex = i;
-        break;
-      }
-    }
-  }
-
-  const currentStep = route.steps[activeStepIndex] || route.steps[0] || null;
-  const nextStep = route.steps[activeStepIndex + 1] || currentStep;
-
-  let distanceToNextManeuverM = currentStep ? Math.round(currentStep.distanceM * 0.4) : 300;
-  if (nextStep && nextStep.maneuver.location) {
-    distanceToNextManeuverM = Math.round(
-      calculateDistanceMeters(currentLocation, {
-        lat: nextStep.maneuver.location[1],
-        lng: nextStep.maneuver.location[0],
-      })
-    );
-  }
-
-  const instruction = nextStep?.maneuver.instruction || currentStep?.maneuver.instruction || 'Continue on route';
-  const maneuverIcon = getManeuverIcon(
-    nextStep?.maneuver.type || 'continue',
-    nextStep?.maneuver.modifier
-  );
-
-  const durationRemainingS = Math.round((distanceRemainingM / Math.max(route.distanceM / route.durationS, 5)));
+  const currentStep = steps[currentStepIndex] ?? null;
+  const nextStep = steps[currentStepIndex + 1] ?? null;
+  const upcoming = nextStep ?? currentStep;
 
   return {
-    currentStepIndex: activeStepIndex,
+    currentStepIndex,
     currentStep,
-    distanceToNextManeuverM,
-    instruction,
-    maneuverIcon,
+    distanceToNextManeuverM: Math.round(distanceToNextManeuverM),
+    instruction: upcoming?.maneuver.instruction || 'Continue on route',
+    maneuverIcon: getManeuverIcon(upcoming?.maneuver.type || 'continue', upcoming?.maneuver.modifier),
     isOffRoute,
-    distanceRemainingM,
-    durationRemainingS,
+    distanceRemainingM: Math.round(distanceRemainingM),
+    alongM: position.alongM,
+    segmentIndex: position.segmentIndex,
+    crossTrackM: position.crossTrackM,
+    currentRoad: currentStep?.name && currentStep.name !== 'Unnamed road' ? currentStep.name : '',
   };
 }

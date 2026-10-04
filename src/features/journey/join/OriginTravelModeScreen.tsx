@@ -8,65 +8,82 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { Destination } from '@/types/journey';
 import { TravelMode, OriginLocation } from '@/types/member';
 import { useProfileStore } from '@/store/useProfileStore';
-import { joinJourneyInDb } from '@/services/firebase/rtdbService';
+import { joinJourneyAction } from '@/session/journeyActions';
+import { usePickedPlace } from '@/store/usePlacePickerStore';
+import { CURRENT_LOCATION_ORIGIN, PickerTarget, pickedToOrigin } from '@/domain/placeMapping';
+import { PlaceField } from '@/components/common/PlaceField';
+import { JourneyError } from '@/data/errors';
+import { useJourneyStore } from '@/store/useJourneyStore';
+import { CarIcon, BikeIcon, WalkIcon } from '@/components/common/Icons';
 
 interface OriginTravelModeScreenProps {
   journeyId: string;
   journeyName: string;
-  destination: Destination;
+  destinationName: string;
   onJoined: () => void;
+  /** Offered when the user already belongs to another active journey. */
+  onResumeExisting: () => void;
+  onPickPlace: (target: PickerTarget) => void;
   onCancel: () => void;
 }
-
-const PRESET_ORIGINS: OriginLocation[] = [
-  { displayName: 'Current GPS Location', lat: 28.6139, lng: 77.2090 },
-  { displayName: 'Delhi NCR', lat: 28.6139, lng: 77.2090 },
-  { displayName: 'Jaipur, Rajasthan', lat: 26.9124, lng: 75.7873 },
-  { displayName: 'Gwalior, MP', lat: 26.2183, lng: 78.1828 },
-  { displayName: 'Mumbai, Maharashtra', lat: 19.0760, lng: 72.8777 },
-];
 
 export const OriginTravelModeScreen: React.FC<OriginTravelModeScreenProps> = ({
   journeyId,
   journeyName,
-  destination,
+  destinationName,
   onJoined,
+  onResumeExisting,
+  onPickPlace,
   onCancel,
 }) => {
   const { profile } = useProfileStore();
 
-  const [selectedOrigin, setSelectedOrigin] = useState<OriginLocation>(PRESET_ORIGINS[0]);
+  const [selectedOrigin, setSelectedOrigin] = useState<OriginLocation>(CURRENT_LOCATION_ORIGIN);
   const [travelMode, setTravelMode] = useState<TravelMode>('CAR');
   const [isJoining, setIsJoining] = useState(false);
 
+  usePickedPlace('origin', (picked) => setSelectedOrigin(pickedToOrigin(picked)));
+
   const handleJoin = async () => {
-    if (!profile || !profile.uid) {
+    if (!profile) {
       Alert.alert('Profile Incomplete', 'Please ensure your profile is filled before joining.');
       return;
     }
 
     try {
       setIsJoining(true);
-      await joinJourneyInDb(
-        {
-          uid: profile.uid,
-          name: profile.name,
-          username: profile.username,
-          phone: profile.phone,
-          photoUrl: profile.photoUrl,
-        },
-        journeyId,
-        selectedOrigin,
-        travelMode
-      );
-      setIsJoining(false);
+      await joinJourneyAction(journeyId, { origin: selectedOrigin, travelMode });
       onJoined();
-    } catch (error: any) {
+    } catch (error) {
+      if (error instanceof JourneyError && error.code === 'ALREADY_IN_JOURNEY') {
+        const hasLocalJourney = useJourneyStore.getState().activeJourneyId !== null;
+        Alert.alert(
+          'Already in a journey',
+          error.message,
+          hasLocalJourney
+            ? [{ text: 'Not now', style: 'cancel' }, { text: 'Open my journey', onPress: onResumeExisting }]
+            : [{ text: 'OK' }]
+        );
+      } else {
+        const message = error instanceof JourneyError ? error.message : 'Could not join journey.';
+        Alert.alert('Join Failed', message);
+      }
+    } finally {
       setIsJoining(false);
-      Alert.alert('Join Failed', error?.message || 'Could not join journey.');
+    }
+  };
+
+  const renderModeIcon = (mode: TravelMode, isSelected: boolean) => {
+    const color = isSelected ? '#ffffff' : '#475569';
+    switch (mode) {
+      case 'CAR':
+        return <CarIcon size={20} color={color} />;
+      case 'BIKE':
+        return <BikeIcon size={20} color={color} />;
+      case 'WALK':
+        return <WalkIcon size={20} color={color} />;
     }
   };
 
@@ -75,57 +92,71 @@ export const OriginTravelModeScreen: React.FC<OriginTravelModeScreenProps> = ({
       <View style={styles.header}>
         <Text style={styles.title}>Trip Setup: {journeyName}</Text>
         <Text style={styles.subtitle}>
-          All travelers head to <Text style={styles.bold}>{destination.displayName}</Text>. Select your
+          All travelers head to <Text style={styles.bold}>{destinationName}</Text>. Select your
           individual origin and vehicle mode.
         </Text>
       </View>
 
-      {/* Origin Selection */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Your Starting Location</Text>
-        <View style={styles.chipRow}>
-          {PRESET_ORIGINS.map((orig, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={[
-                styles.chip,
-                selectedOrigin.displayName === orig.displayName && styles.chipSelected,
-              ]}
-              onPress={() => setSelectedOrigin(orig)}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  selectedOrigin.displayName === orig.displayName && styles.chipTextSelected,
-                ]}
-              >
-                {orig.displayName}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      {/* Route Overview Card (Matching Screenshot 4: Origin A & Destination B) */}
+      <View style={styles.routeBox}>
+        <View style={styles.pointRow}>
+          <View style={styles.pointCircleA}>
+            <Text style={styles.pointLetter}>A</Text>
+          </View>
+          <View style={styles.pointTextContainer}>
+            <Text style={styles.pointLabel}>Origin (Your Starting Point)</Text>
+            <Text style={styles.pointValue}>{selectedOrigin.displayName}</Text>
+          </View>
+        </View>
+
+        <View style={styles.pointDivider} />
+
+        <View style={styles.pointRow}>
+          <View style={styles.pointCircleB}>
+            <Text style={styles.pointLetter}>B</Text>
+          </View>
+          <View style={styles.pointTextContainer}>
+            <Text style={styles.pointLabel}>Destination (Convoy Target)</Text>
+            <Text style={styles.pointValue}>{destinationName}</Text>
+          </View>
         </View>
       </View>
 
-      {/* Travel Mode Selection */}
+      <View style={styles.section}>
+        <PlaceField
+          label="Your starting point"
+          value={selectedOrigin.displayName}
+          detail={selectedOrigin.kind === 'GPS' ? 'Taken from your GPS when you press Start' : undefined}
+          placeholder="Choose a starting point"
+          onPress={() => onPickPlace('origin')}
+        />
+        <Text style={styles.originHint}>You can change this in the lobby until you press Start.</Text>
+      </View>
+
+      {/* Travel Mode Selection (Zero Emojis, Pure SVG Vector Icons) */}
       <View style={styles.section}>
         <Text style={styles.label}>Travel Mode</Text>
         <View style={styles.modeRow}>
-          {(['CAR', 'BIKE', 'WALK'] as TravelMode[]).map((mode) => (
-            <TouchableOpacity
-              key={mode}
-              style={[styles.modeButton, travelMode === mode && styles.modeButtonSelected]}
-              onPress={() => setTravelMode(mode)}
-            >
-              <Text
-                style={[
-                  styles.modeButtonText,
-                  travelMode === mode && styles.modeButtonTextSelected,
-                ]}
+          {(['CAR', 'BIKE', 'WALK'] as TravelMode[]).map((mode) => {
+            const isSelected = travelMode === mode;
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.modeButton, isSelected && styles.modeButtonSelected]}
+                onPress={() => setTravelMode(mode)}
               >
-                {mode === 'CAR' ? '🚗 Car' : mode === 'BIKE' ? '🏍️ Bike' : '🚶 Walk'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                {renderModeIcon(mode, isSelected)}
+                <Text
+                  style={[
+                    styles.modeButtonText,
+                    isSelected && styles.modeButtonTextSelected,
+                  ]}
+                >
+                  {mode === 'CAR' ? 'Car' : mode === 'BIKE' ? 'Bike' : 'Walk'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -147,7 +178,7 @@ export const OriginTravelModeScreen: React.FC<OriginTravelModeScreenProps> = ({
         {isJoining ? (
           <ActivityIndicator color="#ffffff" />
         ) : (
-          <Text style={styles.joinButtonText}>Confirm & Enter Lobby</Text>
+          <Text style={styles.joinButtonText}>Confirm & Enter Convoy Lobby</Text>
         )}
       </TouchableOpacity>
 
@@ -161,7 +192,7 @@ export const OriginTravelModeScreen: React.FC<OriginTravelModeScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    backgroundColor: '#090d16',
+    backgroundColor: '#f8fafc',
     flexGrow: 1,
   },
   header: {
@@ -169,26 +200,91 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: '700',
-    color: '#f8fafc',
+    fontWeight: '800',
+    color: '#0f172a',
     marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#64748b',
     lineHeight: 20,
   },
   bold: {
-    color: '#38bdf8',
+    color: '#2563eb',
     fontWeight: '700',
+  },
+  routeBox: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 24,
+  },
+  pointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pointCircleA: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pointCircleB: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#fee2e2',
+    borderWidth: 1.5,
+    borderColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pointLetter: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  pointTextContainer: {
+    flex: 1,
+  },
+  pointLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  pointValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  pointDivider: {
+    height: 16,
+    width: 2,
+    backgroundColor: '#e2e8f0',
+    marginLeft: 15,
+    marginVertical: 4,
+  },
+  originHint: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 6,
   },
   section: {
     marginBottom: 24,
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#cbd5e1',
+    fontWeight: '700',
+    color: '#0f172a',
     marginBottom: 8,
   },
   chipRow: {
@@ -197,24 +293,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
   },
   chipSelected: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   chipText: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   chipTextSelected: {
-    color: '#38bdf8',
+    color: '#2563eb',
     fontWeight: '700',
   },
   modeRow: {
@@ -223,49 +319,52 @@ const styles = StyleSheet.create({
   },
   modeButton: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     paddingVertical: 14,
     alignItems: 'center',
-    borderRadius: 10,
+    justifyContent: 'center',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
+    gap: 6,
   },
   modeButtonSelected: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+    borderColor: '#2563eb',
+    backgroundColor: '#2563eb',
   },
   modeButtonText: {
-    color: '#94a3b8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modeButtonTextSelected: {
-    color: '#38bdf8',
+    color: '#475569',
+    fontSize: 13,
     fontWeight: '700',
   },
+  modeButtonTextSelected: {
+    color: '#ffffff',
+  },
   noticeBox: {
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
+    backgroundColor: '#f8fafc',
     borderLeftWidth: 3,
-    borderLeftColor: '#06b6d4',
+    borderLeftColor: '#2563eb',
     padding: 12,
     borderRadius: 8,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   noticeTitle: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#38bdf8',
+    fontWeight: '800',
+    color: '#2563eb',
     textTransform: 'uppercase',
     marginBottom: 4,
   },
   noticeText: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     lineHeight: 18,
   },
   joinButton: {
-    backgroundColor: '#06b6d4',
-    borderRadius: 12,
+    backgroundColor: '#2563eb',
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 12,
@@ -282,5 +381,6 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#64748b',
     fontSize: 14,
+    fontWeight: '600',
   },
 });

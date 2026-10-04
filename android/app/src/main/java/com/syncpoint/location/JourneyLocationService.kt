@@ -47,15 +47,22 @@ class JourneyLocationService : Service() {
         notificationController = NotificationController(this)
         samplingPolicy = AdaptiveSamplingPolicy()
 
+        // Every fix is forwarded, even while sharing is paused: pausing only stops *publishing*
+        // (decided in JS), the traveler's own navigation keeps working.
         locationEngine = LocationEngine(this, samplingPolicy) { location, shouldPublish ->
-            if (!isSharingPaused) {
-                activeLocationListener?.invoke(location, shouldPublish)
-            }
+            activeLocationListener?.invoke(location, shouldPublish)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: return START_STICKY
+        // A null intent means Android restarted us after killing the process. The JS side that
+        // consumes location events is gone too, so a zombie service would only burn battery:
+        // stop, and let the app re-start tracking when the user reopens it.
+        val action = intent?.action
+        if (action == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         when (action) {
             ACTION_START -> {
@@ -74,7 +81,7 @@ class JourneyLocationService : Service() {
             }
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startTracking() {

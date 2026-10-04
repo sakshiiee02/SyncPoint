@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,13 @@ import {
 import {
   offlineMapService,
   DownloadProgress,
-  BoundingBox,
+  SavedOfflineMap,
 } from '@/services/offlineMaps/offlineMapService';
-import { OfflineMapPackRecord } from '@/db/sqliteClient';
+import { estimateBytes, formatBytes } from '@/domain/tileMath';
+import { useNavigationStore } from '@/store/useNavigationStore';
+import { useTrackingStore } from '@/store/useTrackingStore';
 import { Destination } from '@/types/journey';
+import { CloseIcon, RouteIcon } from '@/components/common/Icons';
 
 interface OfflineMapModalProps {
   journeyId: string;
@@ -25,123 +28,139 @@ export const OfflineMapModal: React.FC<OfflineMapModalProps> = ({
   destination,
   onClose,
 }) => {
-  const [downloadPacks, setDownloadPacks] = useState<OfflineMapPackRecord[]>([]);
+  const [saved, setSaved] = useState<SavedOfflineMap | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const routeBounds: BoundingBox = {
-    minLat: Math.min(28.6139, destination.lat) - 0.2,
-    maxLat: Math.max(28.6139, destination.lat) + 0.2,
-    minLng: Math.min(77.209, destination.lng) - 0.2,
-    maxLng: Math.max(77.209, destination.lng) + 0.2,
-  };
+  const route = useNavigationStore((s) => s.savedCanonicalRoute ?? s.activeRoute);
+  const selfFix = useTrackingStore((s) => s.selfFix);
 
-  const estimatedBytes = offlineMapService.estimatePackSize(routeBounds);
+  // The region follows the real route (or, before a route exists, your position and the destination).
+  const plan = useMemo(() => {
+    const points =
+      route && route.source !== 'ESTIMATE'
+        ? route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }))
+        : [
+            { lat: destination.lat, lng: destination.lng },
+            ...(selfFix ? [{ lat: selfFix.lat, lng: selfFix.lng }] : []),
+          ];
+    return offlineMapService.planRegion(points);
+  }, [route, selfFix, destination]);
+
+  const refresh = async () => {
+    setSaved(await offlineMapService.getSavedMap(journeyId).catch(() => null));
+  };
 
   useEffect(() => {
-    loadPacks();
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [journeyId]);
 
-  const loadPacks = async () => {
-    const packs = await offlineMapService.getDownloadedPacks(journeyId);
-    setDownloadPacks(packs);
-  };
-
   const handleStartDownload = async () => {
+    if (!plan) return;
     setIsDownloading(true);
+    setProgress({ percentage: 0, completedTiles: 0, downloadedBytes: 0 });
     try {
-      await offlineMapService.downloadRegion(
+      await offlineMapService.download(
         journeyId,
-        `${destination.displayName} Route Corridor`,
-        routeBounds,
-        (prog) => setProgress(prog)
+        `${destination.displayName} route`,
+        plan,
+        setProgress
       );
+      await refresh();
+      Alert.alert('Download complete', 'The map for this route is saved on your phone and works without signal.');
+    } catch (e: any) {
+      Alert.alert('Download failed', e?.message ?? 'Check your connection and try again.');
+    } finally {
       setIsDownloading(false);
       setProgress(null);
-      await loadPacks();
-      Alert.alert('Download Complete', 'Offline map pack is saved and ready for no-signal areas.');
-    } catch (e: any) {
-      setIsDownloading(false);
-      Alert.alert('Download Failed', e.message);
     }
   };
 
-  const handleDeletePack = async (packId: string) => {
-    await offlineMapService.deletePack(packId);
-    await loadPacks();
+  const handleDelete = async () => {
+    await offlineMapService.deleteSavedMap(journeyId).catch(() => undefined);
+    await refresh();
   };
+
+  const estimatedBytes = plan ? estimateBytes(plan.zoom.tiles) : 0;
 
   return (
     <View style={styles.overlay}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>Offline Map Downloads</Text>
+          <Text style={styles.title}>Offline Map</Text>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Text style={styles.closeText}>✕</Text>
+            <CloseIcon size={16} color="#64748b" />
           </TouchableOpacity>
         </View>
 
         <Text style={styles.description}>
-          Download the road corridor so you can view map tiles and continue your route even when network coverage is lost in rural stretches.
+          Save the map along your route so it still shows in areas with no signal. Do this on Wi-Fi
+          before you set off.
         </Text>
 
-        {/* Estimated Size & Download Card */}
         <View style={styles.downloadCard}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Estimated Pack Size:</Text>
-            <Text style={styles.infoValue}>{offlineMapService.formatBytes(estimatedBytes)}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Corridor Region:</Text>
-            <Text style={styles.infoSub} numberOfLines={1}>{destination.displayName}</Text>
-          </View>
+          {plan ? (
+            <>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Approx. size:</Text>
+                <Text style={styles.infoValue}>{formatBytes(estimatedBytes)}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Region:</Text>
+                <Text style={styles.infoSub} numberOfLines={1}>
+                  Route to {destination.displayName}
+                </Text>
+              </View>
+              {plan.zoom.reducedDetail && (
+                <Text style={styles.note}>
+                  This is a long route, so street-level detail is limited to larger roads and towns.
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={styles.note}>Waiting for your location or route before a region can be chosen.</Text>
+          )}
 
           {isDownloading ? (
             <View style={styles.progressContainer}>
               <View style={styles.progressBar}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${progress ? progress.percentage : 0}%` },
-                  ]}
-                />
+                <View style={[styles.progressFill, { width: `${progress ? progress.percentage : 0}%` }]} />
               </View>
               <Text style={styles.progressText}>
-                Downloading tiles: {progress ? `${progress.percentage}%` : 'Starting...'}
+                Downloading map: {progress ? `${Math.round(progress.percentage)}%` : 'Starting...'}
               </Text>
             </View>
           ) : (
             <TouchableOpacity
-              style={styles.downloadButton}
+              style={[styles.downloadButton, !plan && styles.downloadDisabled]}
               onPress={handleStartDownload}
+              disabled={!plan}
               activeOpacity={0.8}
             >
-              <Text style={styles.downloadButtonText}>⬇️ Download Corridor Pack</Text>
+              <RouteIcon size={16} color="#ffffff" />
+              <Text style={styles.downloadButtonText}>
+                {saved ? 'Download again' : 'Download route map'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Saved Packs List */}
-        <Text style={styles.packsHeader}>Downloaded Packs ({downloadPacks.length})</Text>
-        {downloadPacks.length === 0 ? (
-          <Text style={styles.emptyText}>No offline map downloaded for this trip yet.</Text>
-        ) : (
-          downloadPacks.map((pack) => (
-            <View key={pack.packId} style={styles.packItem}>
-              <View style={styles.packInfo}>
-                <Text style={styles.packName}>{pack.name}</Text>
-                <Text style={styles.packSize}>
-                  {offlineMapService.formatBytes(pack.sizeBytes)} • Saved
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => handleDeletePack(pack.packId)}
-                style={styles.deleteButton}
-              >
-                <Text style={styles.deleteText}>Delete</Text>
-              </TouchableOpacity>
+        <Text style={styles.packsHeader}>On this phone</Text>
+        {saved ? (
+          <View style={styles.packItem}>
+            <View style={styles.packInfo}>
+              <Text style={styles.packName}>{saved.label}</Text>
+              <Text style={styles.packSize}>
+                {saved.isComplete ? 'Saved and ready offline' : `Incomplete (${Math.round(saved.percentage)}%)`}
+              </Text>
             </View>
-          ))
+            <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+              <Text style={styles.deleteText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>No offline map saved for this trip yet.</Text>
         )}
       </View>
     </View>
@@ -151,20 +170,20 @@ export const OfflineMapModal: React.FC<OfflineMapModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
     zIndex: 50,
   },
   container: {
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 20,
     width: '100%',
     maxWidth: 400,
-    borderWidth: 1.5,
-    borderColor: '#06b6d4',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   header: {
     flexDirection: 'row',
@@ -175,29 +194,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: '#0f172a',
   },
   closeBtn: {
     padding: 6,
   },
-  closeText: {
-    color: '#94a3b8',
-    fontSize: 16,
-    fontWeight: '700',
-  },
   description: {
-    fontSize: 12,
-    color: '#94a3b8',
+    fontSize: 13,
+    color: '#64748b',
     lineHeight: 18,
     marginBottom: 16,
   },
   downloadCard: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     padding: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   infoRow: {
     flexDirection: 'row',
@@ -206,24 +220,38 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
+    fontWeight: '600',
   },
   infoValue: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#38bdf8',
+    fontWeight: '800',
+    color: '#2563eb',
   },
   infoSub: {
     fontSize: 12,
-    color: '#cbd5e1',
+    color: '#0f172a',
+    fontWeight: '600',
     maxWidth: 180,
   },
   downloadButton: {
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#2563eb',
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     marginTop: 10,
+  },
+  downloadDisabled: {
+    backgroundColor: '#94a3b8',
+  },
+  note: {
+    fontSize: 12,
+    color: '#92400e',
+    lineHeight: 17,
+    marginTop: 2,
   },
   downloadButtonText: {
     color: '#ffffff',
@@ -235,64 +263,66 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#334155',
+    backgroundColor: '#e2e8f0',
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 6,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#2563eb',
   },
   progressText: {
     fontSize: 11,
-    color: '#38bdf8',
+    color: '#2563eb',
     textAlign: 'center',
     fontWeight: '600',
   },
   packsHeader: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#64748b',
     marginBottom: 8,
     textTransform: 'uppercase',
   },
   emptyText: {
     fontSize: 12,
-    color: '#64748b',
+    color: '#94a3b8',
     fontStyle: 'italic',
   },
   packItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     padding: 10,
     borderRadius: 8,
     marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   packInfo: {
     flex: 1,
   },
   packName: {
     fontSize: 13,
-    color: '#f8fafc',
+    color: '#0f172a',
     fontWeight: '600',
   },
   packSize: {
     fontSize: 11,
-    color: '#94a3b8',
+    color: '#64748b',
   },
   deleteButton: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: '#fef2f2',
     borderRadius: 6,
-    borderWidth: 0.5,
-    borderColor: '#ef4444',
+    borderWidth: 1,
+    borderColor: '#fecaca',
   },
   deleteText: {
-    color: '#f87171',
+    color: '#dc2626',
     fontSize: 11,
     fontWeight: '700',
   },

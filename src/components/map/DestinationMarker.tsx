@@ -9,18 +9,17 @@ interface DestinationMarkerProps {
 export const DestinationMarker: React.FC<DestinationMarkerProps> = ({ destination }) => {
   return (
     <View style={styles.container}>
-      {/* Outer Pulsing Radar Ring */}
-      <View style={styles.radarRingDelayed} />
-      <View style={styles.radarRing} />
+      {/* Outer Soft Halo */}
+      <View style={styles.haloRing} />
 
-      {/* Center Target Icon */}
-      <View style={styles.centerPin}>
-        <View style={styles.pinInner} />
+      {/* Red Map Pin with White Center Dot (Matching Reference Screenshot 4) */}
+      <View style={styles.pinBody}>
+        <View style={styles.pinDot} />
       </View>
 
-      {/* Destination Tag */}
+      {/* Destination Tag Pill */}
       <View style={styles.tagContainer}>
-        <Text style={styles.tagLabel}>SYNC POINT</Text>
+        <Text style={styles.tagLabel}>DESTINATION</Text>
         <Text style={styles.tagName} numberOfLines={1}>
           {destination.displayName}
         </Text>
@@ -36,64 +35,48 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
   },
-  radarRing: {
+  haloRing: {
     position: 'absolute',
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 2,
-    borderColor: 'rgba(6, 182, 212, 0.45)',
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
   },
-  radarRingDelayed: {
-    position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    borderWidth: 1.5,
-    borderColor: 'rgba(6, 182, 212, 0.25)',
-    backgroundColor: 'rgba(6, 182, 212, 0.04)',
-  },
-  centerPin: {
+  pinBody: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#ef4444',
     borderWidth: 3,
     borderColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#06b6d4',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 10,
-    elevation: 8,
   },
-  pinInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  pinDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#ffffff',
   },
   tagContainer: {
     marginTop: 6,
-    backgroundColor: 'rgba(9, 13, 22, 0.92)',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#06b6d4',
+    borderColor: '#e2e8f0',
     alignItems: 'center',
     maxWidth: 130,
   },
   tagLabel: {
-    color: '#06b6d4',
+    color: '#ef4444',
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
   tagName: {
-    color: '#f8fafc',
+    color: '#0f172a',
     fontSize: 11,
     fontWeight: '700',
   },

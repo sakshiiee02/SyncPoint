@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { Destination } from '@/types/journey';
+import { AlertTriangleIcon, PhoneIcon, ShareIcon } from '@/components/common/Icons';
 
 interface EmergencyActionSheetProps {
   currentLocation: { lat: number; lng: number } | null;
@@ -70,7 +71,9 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
       <View style={styles.sheetContainer}>
         {/* Header Alert */}
         <View style={styles.alertHeader}>
-          <Text style={styles.alertIcon}>🚨</Text>
+          <View style={styles.alertIconWrap}>
+            <AlertTriangleIcon size={24} color="#dc2626" />
+          </View>
           <View>
             <Text style={styles.alertTitle}>Need Assistance?</Text>
             <Text style={styles.alertSub}>Immediate convoy alerts & emergency dialing</Text>
@@ -90,7 +93,7 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
           )}
         </View>
 
-        {/* Primary Action Buttons */}
+        {/* Primary Action Buttons (Zero Emojis, Crisp MNC styling) */}
         <View style={styles.actionsList}>
           {/* 1. Broadcast Urgent Alert to Convoy */}
           <TouchableOpacity
@@ -98,7 +101,8 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
             onPress={handleBroadcastConvoyHelp}
             activeOpacity={0.8}
           >
-            <Text style={styles.convoyHelpText}>📢 Broadcast "Need Help" to Convoy</Text>
+            <AlertTriangleIcon size={18} color="#ffffff" />
+            <Text style={styles.convoyHelpText}>Broadcast Help Alert to Convoy</Text>
           </TouchableOpacity>
 
           {/* 2. Call Emergency Services (112) */}
@@ -107,7 +111,8 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
             onPress={handleCallEmergencyServices}
             activeOpacity={0.8}
           >
-            <Text style={styles.sosButtonText}>📞 Call Emergency Services (112)</Text>
+            <PhoneIcon size={18} color="#ffffff" />
+            <Text style={styles.sosButtonText}>Call Emergency Services (112)</Text>
           </TouchableOpacity>
 
           {/* 3. Share Outside Apps */}
@@ -116,7 +121,8 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
             onPress={handleShareExternalLocation}
             activeOpacity={0.8}
           >
-            <Text style={styles.shareButtonText}>📍 Share Live GPS Link</Text>
+            <ShareIcon size={16} color="#0f172a" />
+            <Text style={styles.shareButtonText}>Share Live GPS Link</Text>
           </TouchableOpacity>
         </View>
 
@@ -131,7 +137,8 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
                   style={styles.travelerChip}
                   onPress={() => handleCallTraveler(p.phone, p.name)}
                 >
-                  <Text style={styles.travelerChipText}>📞 {p.name.split(' ')[0]}</Text>
+                  <PhoneIcon size={12} color="#2563eb" />
+                  <Text style={styles.travelerChipText}>{p.name.split(' ')[0]}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -140,7 +147,7 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
 
         {/* Mandatory Disclaimer (Section 14.3) */}
         <Text style={styles.disclaimerText}>
-          ⚠️ This emergency feature is a convoy coordination convenience. In case of life-threatening
+          This emergency feature is a convoy coordination convenience. In case of life-threatening
           accidents or medical emergencies, always call emergency services (112 / 108) immediately.
         </Text>
 
@@ -155,17 +162,17 @@ export const EmergencyActionSheet: React.FC<EmergencyActionSheetProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.82)',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'flex-end',
     zIndex: 60,
   },
   sheetContainer: {
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
-    borderTopWidth: 2,
-    borderColor: '#ef4444',
+    borderTopWidth: 1,
+    borderColor: '#e2e8f0',
   },
   alertHeader: {
     flexDirection: 'row',
@@ -173,41 +180,46 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
-  alertIcon: {
-    fontSize: 28,
+  alertIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fee2e2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   alertTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: '#0f172a',
   },
   alertSub: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
   },
   locationBox: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   locationLabel: {
     fontSize: 11,
-    color: '#94a3b8',
-    fontWeight: '600',
+    color: '#64748b',
+    fontWeight: '700',
     textTransform: 'uppercase',
   },
   locationRoad: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#f8fafc',
+    color: '#0f172a',
     marginTop: 2,
   },
   locationCoords: {
     fontSize: 12,
-    color: '#06b6d4',
+    color: '#2563eb',
     marginTop: 2,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
@@ -216,10 +228,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   convoyHelpButton: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#d97706',
     paddingVertical: 14,
     borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   convoyHelpText: {
     color: '#ffffff',
@@ -227,10 +242,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   sosButton: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#dc2626',
     paddingVertical: 14,
     borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   sosButtonText: {
     color: '#ffffff',
@@ -238,15 +256,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   shareButton: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     paddingVertical: 12,
     borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   shareButtonText: {
-    color: '#38bdf8',
+    color: '#0f172a',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -255,24 +276,27 @@ const styles = StyleSheet.create({
   },
   travelersLabel: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: 8,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   chipsRow: {
     flexDirection: 'row',
     gap: 8,
   },
   travelerChip: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#eff6ff',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#bfdbfe',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   travelerChipText: {
-    color: '#cbd5e1',
+    color: '#2563eb',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -288,7 +312,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: 14,
     fontWeight: '600',
   },

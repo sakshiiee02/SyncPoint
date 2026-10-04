@@ -18,31 +18,36 @@ SyncPoint is a temporary, journey-centered Android mobile application built for 
 
 ---
 
-## Monorepo Architecture
+## Getting started
+
+```bash
+npm install --legacy-peer-deps
+cp .env.example .env        # then fill in the Firebase + provider keys (see comments inside)
+npm run typecheck && npm test
+npm run test:integration    # security rules + journey flows against the local Firebase emulator (needs firebase-tools + Java)
+npm start                   # Metro
+npm run android             # build & run on a device (JDK 17-21 for Gradle)
+```
+
+Firebase setup (free Spark plan, no Cloud Functions): create a Realtime Database, enable
+**Anonymous** sign-in, then `firebase deploy --only database`. Details in `docs/firebase-rules.md`.
+
+## Project layout
 
 ```
-/s/SyncPoint
-├── src/                # React Native app source (TypeScript)
-│   ├── app/            # Navigation stacks, providers, app entry
-│   ├── features/       # auth, profile, home, journey (create, join, lobby, active, history, chat)
-│   ├── components/     # Map components, bottom sheet, traveler cards, status chips
-│   ├── services/       # Firebase RTDB & Auth, OSRM routing, FCM, native location bridge
-│   ├── store/          # Zustand stores (journey, profile, navigation, liveLocation)
-│   ├── db/             # SQLite local offline cache
-│   ├── constants/      # App config & adaptive sampling thresholds
-│   ├── types/          # Domain schemas & TypeScript definitions
-│   └── utils/          # Geodesic math, time formatting, battery monitor
-├── android/            # Android native Gradle project & Kotlin location module
-│   └── app/src/main/java/com/syncpoint/location/
-│       ├── JourneyLocationService.kt
-│       ├── LocationEngine.kt
-│       ├── AdaptiveSamplingPolicy.kt
-│       ├── NotificationController.kt
-│       └── LocationBridgeModule.kt
-├── functions/          # Firebase Cloud Functions (trusted server-side lifecycle)
-├── routing/            # OSRM routing configurations & profile definitions
-├── docs/               # Developer handoff specifications & architecture documentation
-└── tests/              # Multi-traveler simulation harness & unit tests
+src/
+  app/            navigation (React Navigation), bootstrap
+  features/       screens: home, profile, journey (create, join, lobby, active, chat, history)
+  session/        live journey session + user-facing actions
+  data/           Realtime Database repositories, schema paths, serialization, server clock
+  domain/         pure rules: traveler state machine, seats, join codes, invite links
+  services/       firebase client/auth, location bridge, routing, offline maps
+  store/          Zustand mirrors of session/profile state
+  config/         typed environment
+android/          Gradle project + Kotlin foreground location service
+tests/unit        pure-logic tests;  tests/integration  rules + flows against the Firebase emulator
+docs/             architecture + security rules
+index.html, src/web   landing page (Vite) - deployed separately
 ```
 
 ---

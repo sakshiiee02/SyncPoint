@@ -1,439 +1,294 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Linking } from 'react-native';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useProfileStore } from '@/store/useProfileStore';
-import {
-  useLiveLocationStore,
-  computeParticipantLiveState,
-} from '@/store/useLiveLocationStore';
+import { useLiveLocationStore } from '@/store/useLiveLocationStore';
 import { useNavigationStore } from '@/store/useNavigationStore';
+import { useTrackingStore } from '@/store/useTrackingStore';
+import { buildParticipantViews } from '@/domain/participantView';
+import { isTerminalTravelerState, isTravelingState } from '@/types/member';
+import { ParticipantLiveState } from '@/types/liveLocation';
+import { QuickStatusType } from '@/types/status';
+import { JourneyError } from '@/data/errors';
+import { useNow } from '@/hooks/useNow';
+import { useConnectivityStore } from '@/services/connectivity';
 import {
-  subscribeToLiveLocations,
-  setLocationSharingPaused,
-  publishLiveLocation,
-} from '@/services/firebase/liveLocationService';
-import { subscribeToJourney } from '@/services/firebase/rtdbService';
-import { LocationBridge, RawLocationUpdate } from '@/services/location/LocationBridge';
-import { requestLocationPermissions } from '@/services/location/permissionService';
-import { adaptiveSampler } from '@/services/location/adaptiveSamplingService';
-import { getRoute } from '@/services/routing/osrmService';
-import { evaluateNavigationProgress } from '@/services/routing/navigationEngine';
-import { voiceGuidance } from '@/services/routing/voiceGuidanceService';
-import { localDb } from '@/db/sqliteClient';
-import { syncService } from '@/services/offlineMaps/reconnectSyncService';
+  endJourneyAction,
+  finishJourneyAction,
+  leaveJourneyAction,
+} from '@/session/journeyActions';
+import { resumeTrackingIfNeeded, stopTracking } from '@/tracking/journeyTracking';
+import { trackingController } from '@/tracking/trackingController';
+import { getRoute } from '@/services/routing';
+import { broadcastQuickStatus } from '@/services/firebase/statusService';
 import { MapLibreContainer } from '@/components/map/MapLibreContainer';
-import { NextManeuverBanner } from './components/NextManeuverBanner';
 import { RecenterButton } from '@/components/map/RecenterButton';
+import { BackIcon } from '@/components/common/Icons';
+import { formatDistance } from '@/utils/geoMath';
+import { CONFIG } from '@/constants/config';
+import { NextManeuverBanner } from './components/NextManeuverBanner';
 import { TravelerBottomSheet } from './components/TravelerBottomSheet';
 import { TravelerDetailCard } from './components/TravelerDetailCard';
 import { OfflineMapModal } from './components/OfflineMapModal';
 import { QuickStatusPicker } from './components/QuickStatusPicker';
 import { EmergencyActionSheet } from './components/EmergencyActionSheet';
-import { broadcastQuickStatus } from '@/services/firebase/statusService';
-import { QuickStatusType } from '@/types/status';
-import { ParticipantLiveState, LiveLocationRecord } from '@/types/liveLocation';
-import { isWithinRadius, calculateDistanceMeters, formatDistance } from '@/utils/geoMath';
-import { computeTravelerSummary } from '@/utils/historyCompression';
-import { saveParticipantHistory } from '@/services/firebase/historyService';
-import { CONFIG } from '@/constants/config';
 
 interface ActiveJourneyScreenProps {
-  journeyId: string;
+  /** Return to Home after the user has finished / left / ended the journey. */
   onExit: () => void;
+  /** Go back to Home while the journey (and sharing) keeps running. */
+  onBack: () => void;
   onOpenChat: () => void;
 }
 
+/**
+ * The live map. This screen only *displays* state: GPS, routing, voice, arrival detection and
+ * publishing are done by the TrackingController, so they keep working when this screen is closed.
+ */
 export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
-  journeyId,
   onExit,
+  onBack,
   onOpenChat,
 }) => {
-  const { currentJourney, members, setCurrentJourney, setMembers, updateMemberSharingState } =
-    useJourneyStore();
-  const { profile } = useProfileStore();
-  const {
-    locations,
-    isSharingPaused,
-    selectedTravelerUid,
-    setAllLocations,
-    setSharingPaused,
-    setSelectedTravelerUid,
-  } = useLiveLocationStore();
+  const currentJourney = useJourneyStore((s) => s.currentJourney);
+  const members = useJourneyStore((s) => s.members);
+  const uid = useProfileStore((s) => s.uid);
+  const locations = useLiveLocationStore((s) => s.locations);
+  const selectedTravelerUid = useLiveLocationStore((s) => s.selectedTravelerUid);
+  const setSelectedTravelerUid = useLiveLocationStore((s) => s.setSelectedTravelerUid);
+  const tracking = useTrackingStore();
+  const nav = useNavigationStore();
+  const nowMs = useNow(5000);
+  const isOnline = useConnectivityStore((s) => s.isOnline);
 
-  const {
-    activeRoute,
-    distanceToNextManeuverM,
-    nextInstruction,
-    maneuverIcon,
-    isOffRoute,
-    isSecondaryRoute,
-    secondaryTravelerName,
-    setActiveRoute,
-    updateProgress,
-    startSecondaryRouteToTraveler,
-    exitSecondaryRoute,
-    resetNavigation,
-  } = useNavigationStore();
-
-  const [hasShownArrivalAlert, setHasShownArrivalAlert] = useState(false);
   const [isOverviewMode, setIsOverviewMode] = useState(false);
   const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
+  const exitRef = useRef(onExit);
+  exitRef.current = onExit;
 
-  // Broadcast quick travel status (Section 14.2 & 14.3)
-  const handleSelectStatus = async (status: QuickStatusType) => {
-    if (!profile?.uid || !currentJourney) return;
+  const me = uid ? members[uid] : undefined;
+  const onTheRoad = me ? isTravelingState(me.state) : false;
+  const isHost = Boolean(uid && currentJourney?.creatorUid === uid);
+
+  const participants = useMemo(
+    () =>
+      buildParticipantViews({
+        members,
+        locations,
+        selfUid: uid,
+        self: {
+          fix: tracking.selfFix,
+          batteryPct: tracking.batteryPct,
+          charging: tracking.charging,
+          distanceRemainingM: tracking.distanceRemainingM,
+          etaEpochMs: tracking.etaEpochMs,
+          currentRoad: tracking.currentRoad,
+          status: tracking.status,
+        },
+        nowMs,
+        staleMs: CONFIG.STALE_WARNING_MS,
+      }),
+    [
+      members,
+      locations,
+      uid,
+      tracking.selfFix,
+      tracking.batteryPct,
+      tracking.charging,
+      tracking.distanceRemainingM,
+      tracking.etaEpochMs,
+      tracking.currentRoad,
+      tracking.status,
+      nowMs,
+    ]
+  );
+  const localParticipant = participants.find((p) => p.isLocalUser);
+  const selectedParticipant = participants.find((p) => p.uid === selectedTravelerUid);
+
+  // Back on the road after an app restart / a previously denied permission.
+  useEffect(() => {
+    if (onTheRoad && !tracking.isTracking) resumeTrackingIfNeeded().catch(() => undefined);
+  }, [onTheRoad, tracking.isTracking]);
+
+  // ── exits: finish my trip / leave / end for everyone ──────────────────────────────────
+  const runExit = async (
+    operation: () => Promise<unknown>,
+    doneTitle: string,
+    doneMessage: string
+  ) => {
     try {
-      await broadcastQuickStatus(
-        journeyId,
-        { uid: profile.uid, name: profile.name || 'Traveler' },
-        status
-      );
+      await stopTracking();
+      await operation();
+      Alert.alert(doneTitle, doneMessage, [{ text: 'OK', onPress: () => exitRef.current() }]);
+    } catch (error) {
+      const message = error instanceof JourneyError ? error.message : 'Please try again.';
+      Alert.alert('Something went wrong', message);
+    }
+  };
+
+  const handleFinishTrip = () =>
+    runExit(finishJourneyAction, 'Trip finished', 'Your trip was saved to your history.');
+
+  const handleLeaveOrEnd = () => {
+    const buttons: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    if (me && !isTerminalTravelerState(me.state)) {
+      buttons.push({ text: 'Finish my trip', onPress: handleFinishTrip });
+    }
+    buttons.push({
+      text: isHost ? 'Hand over & leave' : 'Leave journey',
+      style: 'destructive',
+      onPress: () =>
+        runExit(leaveJourneyAction, 'Left journey', 'You left the journey. Your trip was saved.'),
+    });
+    if (isHost) {
+      buttons.push({
+        text: 'End for everyone',
+        style: 'destructive',
+        onPress: () => runExit(endJourneyAction, 'Journey ended', 'The journey ended for everyone.'),
+      });
+    }
+    Alert.alert(
+      isHost ? 'Finish, leave or end?' : 'Finish or leave?',
+      'Finishing keeps the journey going for your friends. Leaving removes you from it.',
+      buttons
+    );
+  };
+
+  // ── arrival prompt (raised once by the controller) ────────────────────────────────────
+  useEffect(() => {
+    if (!tracking.arrivalPromptPending) return;
+    trackingController.clearArrivalPrompt();
+    Alert.alert(
+      "You've arrived!",
+      `You have reached ${currentJourney?.destination.displayName ?? 'the destination'}. Finish when you're done; until then your friends can still see you.`,
+      [
+        { text: 'Keep sharing', style: 'cancel' },
+        { text: 'Finish my trip', onPress: handleFinishTrip },
+      ]
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracking.arrivalPromptPending]);
+
+  // ── actions ───────────────────────────────────────────────────────────────────────────
+  const handleSelectStatus = async (status: QuickStatusType) => {
+    if (!uid || !me || !currentJourney) return;
+    try {
+      await trackingController.setStatus(status);
+      await broadcastQuickStatus(currentJourney.journeyId, { uid, name: me.name }, status);
     } catch (e: any) {
       console.warn('Failed to update status:', e.message);
     }
   };
 
-  // 1. Subscribe to Journey Metadata & Live Locations
-  useEffect(() => {
-    const unsubJourney = subscribeToJourney(
-      journeyId,
-      (meta) => setCurrentJourney(meta),
-      (mems) => setMembers(mems)
-    );
-
-    const unsubLocations = subscribeToLiveLocations(journeyId, (liveMap) => {
-      setAllLocations(liveMap);
-    });
-
-    return () => {
-      unsubJourney();
-      unsubLocations();
-    };
-  }, [journeyId, setCurrentJourney, setMembers, setAllLocations]);
-
-  // 2. Initial Route Calculation with Offline SQLite Caching (Phase 5)
-  useEffect(() => {
-    async function loadInitialRoute() {
-      if (!currentJourney || activeRoute) return;
-
-      // Check SQLite cache first for instant offline startup
-      const cached = await localDb.getCachedRoute(journeyId);
-      if (cached) {
-        setActiveRoute(cached);
-      }
-
-      const myMember = profile?.uid ? members[profile.uid] : undefined;
-      const origin = myMember?.origin || {
-        lat: 28.6139,
-        lng: 77.209,
-        displayName: 'Current Location',
-      };
-      const travelMode = myMember?.travelMode || 'CAR';
-
-      try {
-        const route = await getRoute(
-          { lat: origin.lat, lng: origin.lng },
-          { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng },
-          travelMode
-        );
-        setActiveRoute(route);
-        await localDb.cacheRoute(journeyId, route);
-      } catch (e: any) {
-        console.warn('[ActiveJourney] Route fetch failed, using cached corridor:', e.message);
-      }
-    }
-
-    loadInitialRoute();
-  }, [currentJourney, members, profile?.uid, activeRoute, setActiveRoute, journeyId]);
-
-  // Compute live participant states
-  const participantStates: ParticipantLiveState[] = Object.values(members).map((member) => {
-    const liveRecord = locations[member.uid];
-    const isLocalUser = member.uid === profile?.uid;
-    return computeParticipantLiveState(liveRecord, member, isLocalUser);
-  });
-
-  const localParticipant = participantStates.find((p) => p.isLocalUser);
-  const selectedParticipant = participantStates.find((p) => p.uid === selectedTravelerUid);
-
-  // 3. Navigation Evaluation & Voice Guidance on GPS Fix
-  const handleGpsUpdate = useCallback(
-    async (update: RawLocationUpdate) => {
-      if (!profile?.uid || !currentJourney) return;
-
-      const currentPoint = { lat: update.latitude, lng: update.longitude };
-
-      // Evaluate turn navigation if route is loaded
-      if (activeRoute) {
-        const progress = evaluateNavigationProgress(currentPoint, activeRoute);
-        updateProgress(progress);
-
-        // Voice navigation prompt
-        voiceGuidance.evaluateManeuverPrompt(
-          progress.currentStepIndex,
-          progress.distanceToNextManeuverM,
-          progress.instruction
-        );
-
-        // Off-route automatic recalculation (Section 11.2 & 267)
-        if (progress.isOffRoute && !isSecondaryRoute) {
-          const myMember = members[profile.uid];
-          getRoute(currentPoint, currentJourney.destination, myMember?.travelMode || 'CAR')
-            .then((recalculated) => {
-              setActiveRoute(recalculated);
-              localDb.cacheRoute(journeyId, recalculated);
-            })
-            .catch(() => {});
-        }
-      }
-
-      const distanceRemainingM = calculateDistanceMeters(
-        currentPoint,
-        { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng }
-      );
-
-      const safeSpeedMps = Math.max(update.speedMps, 1.0);
-      const etaEpochMs = Date.now() + Math.round((distanceRemainingM / safeSpeedMps) * 1000);
-
-      const shouldPublish =
-        update.shouldPublish ||
-        adaptiveSampler.shouldPublish(
-          update.latitude,
-          update.longitude,
-          update.speedMps,
-          update.heading
-        );
-
-      if (shouldPublish && !isSharingPaused) {
-        const liveRecord: LiveLocationRecord = {
-          lat: update.latitude,
-          lng: update.longitude,
-          heading: update.heading,
-          speedMps: update.speedMps,
-          batteryPct: 90,
-          status: 'ON_THE_WAY',
-          lastUpdatedAt: Date.now(),
-          currentRoad: activeRoute?.steps[0]?.name || 'Highway Corridor',
-          distanceRemainingM: Math.round(distanceRemainingM),
-          etaEpochMs,
-          routeVersion: activeRoute?.routeVersion || 1,
-          isSharing: true,
-        };
-
-        // Offline Buffer Handling (Section 12): buffer if disconnected, else publish directly
-        const isOnline = await syncService.handleLocationUpdate(journeyId, profile.uid, liveRecord);
-        if (isOnline) {
-          publishLiveLocation(journeyId, profile.uid, liveRecord).catch((err) => {
-            console.warn('[ActiveJourney] Live publish failed, buffering:', err.message);
-            localDb.bufferLocation(journeyId, profile.uid, liveRecord);
-          });
-        }
-      }
-    },
-    [
-      profile?.uid,
-      currentJourney,
-      activeRoute,
-      members,
-      isSecondaryRoute,
-      isSharingPaused,
-      journeyId,
-      setActiveRoute,
-      updateProgress,
-    ]
-  );
-
-  // 4. Initialize Location Service & Listeners
-  useEffect(() => {
-    let unsubLocationBridge: (() => void) | null = null;
-
-    async function initTracking() {
-      const hasPermission = await requestLocationPermissions();
-      if (!hasPermission) return;
-
-      const journeyTitle = currentJourney?.name || 'Road Trip';
-      const destTitle = currentJourney?.destination.displayName || 'Destination';
-
-      await LocationBridge.startTracking(journeyId, journeyTitle, destTitle);
-      unsubLocationBridge = LocationBridge.addLocationListener(handleGpsUpdate);
-    }
-
-    initTracking();
-
-    return () => {
-      if (unsubLocationBridge) unsubLocationBridge();
-      adaptiveSampler.reset();
-      voiceGuidance.reset();
-    };
-  }, [journeyId, currentJourney, handleGpsUpdate]);
-
-  // 5. Proximity / Arrival Check (Section 5.6 & 22)
-  useEffect(() => {
-    if (!currentJourney || !localParticipant || hasShownArrivalAlert) return;
-
-    const arrived = isWithinRadius(
-      { lat: localParticipant.lat, lng: localParticipant.lng },
-      { lat: currentJourney.destination.lat, lng: currentJourney.destination.lng },
-      CONFIG.ARRIVAL_RADIUS_M
-    );
-
-    if (arrived && localParticipant.lat !== 0) {
-      setHasShownArrivalAlert(true);
-      Alert.alert(
-        "You've Arrived! 🏁",
-        `You have reached ${currentJourney.destination.displayName}. Press Finish when you are done tracking.`,
-        [
-          { text: 'Keep Tracking', style: 'cancel' },
-          {
-            text: 'Finish Journey',
-            style: 'destructive',
-            onPress: handleFinishJourney,
-          },
-        ]
-      );
-    }
-  }, [localParticipant, currentJourney, hasShownArrivalAlert]);
-
-  // 6. Handle Secondary Route to Traveler (Section 11.3)
-  const handleNavigateToTraveler = async (targetTraveler: ParticipantLiveState) => {
-    if (!localParticipant) return;
-
-    try {
-      const secondaryRoute = await getRoute(
-        { lat: localParticipant.lat, lng: localParticipant.lng },
-        { lat: targetTraveler.lat, lng: targetTraveler.lng },
-        'CAR'
-      );
-      startSecondaryRouteToTraveler(targetTraveler.name, secondaryRoute);
-      setSelectedTravelerUid(null);
-    } catch (e: any) {
-      Alert.alert('Route Failed', `Could not calculate route to ${targetTraveler.name}.`);
-    }
-  };
-
-  // 7. Handle Pause / Resume Location Sharing
   const handleTogglePause = async () => {
-    if (!profile?.uid || !localParticipant) return;
-    const nextPaused = !isSharingPaused;
-    setSharingPaused(nextPaused);
-
-    if (nextPaused) {
-      await LocationBridge.pauseTracking();
-    } else {
-      await LocationBridge.resumeTracking();
-    }
-
-    const record: LiveLocationRecord = {
-      lat: localParticipant.lat,
-      lng: localParticipant.lng,
-      heading: localParticipant.heading,
-      speedMps: localParticipant.speedMps,
-      batteryPct: localParticipant.batteryPct,
-      status: localParticipant.status,
-      lastUpdatedAt: Date.now(),
-      currentRoad: localParticipant.currentRoad,
-      distanceRemainingM: localParticipant.distanceRemainingM,
-      etaEpochMs: localParticipant.etaEpochMs,
-      routeVersion: localParticipant.routeVersion,
-      isSharing: !nextPaused,
-    };
-
     try {
-      await setLocationSharingPaused(journeyId, profile.uid, record, nextPaused);
-      updateMemberSharingState(profile.uid, nextPaused ? 'PAUSED' : 'ACTIVE');
-    } catch (e: any) {
-      console.warn('Failed to toggle sharing pause:', e.message);
+      await trackingController.setPaused(!tracking.isPaused);
+    } catch (error) {
+      const message = error instanceof JourneyError ? error.message : 'Please try again.';
+      Alert.alert('Could not change sharing', message);
     }
   };
 
-  // 8. Handle Finish Journey (Section 5.6 & 13)
-  const handleFinishJourney = async () => {
-    await LocationBridge.finishTracking();
-    resetNavigation();
-    if (profile?.uid && localParticipant) {
-      updateMemberSharingState(profile.uid, 'FINISHED');
-      const myMember = members[profile.uid];
-      const summary = computeTravelerSummary(
-        [
-          {
-            lat: myMember?.origin?.lat || localParticipant.lat,
-            lng: myMember?.origin?.lng || localParticipant.lng,
-            timestamp: myMember?.startedAt || Date.now() - 3600000,
-            speedMps: localParticipant.speedMps,
-          },
-          {
-            lat: localParticipant.lat,
-            lng: localParticipant.lng,
-            timestamp: Date.now(),
-            speedMps: 0,
-          },
-        ],
-        {
-          uid: profile.uid,
-          name: profile.name || 'Traveler',
-          travelMode: myMember?.travelMode || 'CAR',
-          startedAt: myMember?.startedAt || Date.now() - 3600000,
-          finishedAt: Date.now(),
-        }
+  const handleNavigateToTraveler = async (target: ParticipantLiveState) => {
+    if (!tracking.selfFix || target.positionKind !== 'LIVE') {
+      Alert.alert('Not available', `${target.name} has no live location to navigate to yet.`);
+      return;
+    }
+    try {
+      const route = await getRoute(
+        { lat: tracking.selfFix.lat, lng: tracking.selfFix.lng },
+        { lat: target.lat, lng: target.lng },
+        me?.travelMode ?? 'CAR'
       );
-      saveParticipantHistory(journeyId, summary).catch((err) => {
-        console.warn('Failed to save participant history:', err.message);
-      });
+      nav.startSecondaryRouteToTraveler(target.name, route);
+      setSelectedTravelerUid(null);
+    } catch {
+      Alert.alert('Route Failed', `Could not calculate a route to ${target.name}.`);
     }
-    Alert.alert('Journey Finished', 'You have ended location tracking for this trip.', [
-      { text: 'OK', onPress: onExit },
-    ]);
   };
 
-  const destination = currentJourney?.destination || {
-    lat: 15.3808,
-    lng: 73.8314,
-    displayName: 'Destination',
-  };
+  if (!currentJourney) return <View style={styles.container} />;
+  const destination = currentJourney.destination;
+  const locationOff = onTheRoad && !tracking.isTracking;
 
   return (
     <View style={styles.container}>
-      {/* Map Surface */}
       <MapLibreContainer
         destination={destination}
-        participants={participantStates}
+        participants={participants}
         selectedParticipantUid={selectedTravelerUid}
-        onSelectParticipant={(uid) => setSelectedTravelerUid(uid)}
+        onSelectParticipant={(id) => setSelectedTravelerUid(id)}
+        routeCoordinates={nav.activeRoute?.geometry?.coordinates}
+        isOverviewMode={isOverviewMode}
       >
-        {/* Next Maneuver Banner (Section 6.4, 11.2, 11.3) */}
-        <NextManeuverBanner
-          instruction={nextInstruction}
-          distanceToManeuver={formatDistance(distanceToNextManeuverM)}
-          maneuverIcon={maneuverIcon}
-          currentRoad={localParticipant?.currentRoad || 'NH 48'}
-          isOffRoute={isOffRoute}
-          isSecondaryRoute={isSecondaryRoute}
-          secondaryTravelerName={secondaryTravelerName}
-          onExitSecondaryRoute={exitSecondaryRoute}
-        />
+        <View style={styles.topOverlay} pointerEvents="box-none">
+          <TouchableOpacity style={styles.backPill} onPress={onBack} activeOpacity={0.8}>
+            <BackIcon size={16} color="#0f172a" />
+            <Text style={styles.backPillText}>Home</Text>
+          </TouchableOpacity>
 
-        {/* Quick Travel Status Bar (Section 14.2) */}
-        <QuickStatusPicker
-          currentStatus={localParticipant?.status || 'ON_THE_WAY'}
-          onSelectStatus={handleSelectStatus}
-          onOpenEmergency={() => setIsEmergencyOpen(true)}
-        />
+          {!isOnline && (
+            <View style={styles.offlineBanner}>
+              <Text style={styles.offlineText}>
+                You're offline. Friends see your last position; yours updates when you reconnect.
+              </Text>
+            </View>
+          )}
 
-        {/* Floating Camera Controls */}
+          {locationOff && (
+            <TouchableOpacity
+              style={styles.warningBanner}
+              onPress={() => {
+                resumeTrackingIfNeeded().catch(() => undefined);
+                Linking.openSettings().catch(() => undefined);
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.warningText}>
+                Location sharing is off. Tap to allow location in Settings.
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {onTheRoad && (
+            <NextManeuverBanner
+              instruction={
+                nav.activeRoute?.source === 'ESTIMATE'
+                  ? 'Estimated direct line: turn-by-turn directions are unavailable right now'
+                  : nav.nextInstruction
+              }
+              distanceToManeuver={formatDistance(nav.distanceToNextManeuverM)}
+              maneuverIcon={nav.maneuverIcon}
+              currentRoad={tracking.currentRoad || localParticipant?.currentRoad || ''}
+              isOffRoute={nav.isOffRoute}
+              isSecondaryRoute={nav.isSecondaryRoute}
+              secondaryTravelerName={nav.secondaryTravelerName}
+              onExitSecondaryRoute={nav.exitSecondaryRoute}
+            />
+          )}
+
+          {onTheRoad && (
+            <QuickStatusPicker
+              currentStatus={tracking.status}
+              onSelectStatus={handleSelectStatus}
+              onOpenEmergency={() => setIsEmergencyOpen(true)}
+            />
+          )}
+        </View>
+
         <RecenterButton
           onRecenterSelf={() => {
             setIsOverviewMode(false);
             setSelectedTravelerUid(null);
           }}
-          onFitAll={() => {
-            setIsOverviewMode(true);
-          }}
+          onFitAll={() => setIsOverviewMode(true)}
           isOverviewMode={isOverviewMode}
         />
       </MapLibreContainer>
 
-      {/* Expanded Traveler Card if selected */}
       {selectedParticipant && (
         <TravelerDetailCard
           participant={selectedParticipant}
@@ -443,38 +298,38 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
         />
       )}
 
-      {/* Bottom Sheet Convoy Roster */}
       {!selectedParticipant && (
         <TravelerBottomSheet
-          participants={participantStates}
+          participants={participants}
           selectedUid={selectedTravelerUid}
-          onSelectParticipant={(uid) => setSelectedTravelerUid(uid)}
-          isSharingPaused={isSharingPaused}
+          onSelectParticipant={(id) => setSelectedTravelerUid(id)}
+          isSharingPaused={tracking.isPaused}
+          canTogglePause={me?.state === 'TRAVELING' || me?.state === 'PAUSED'}
           onTogglePauseSharing={handleTogglePause}
           onOpenChat={onOpenChat}
           onOpenOfflineMap={() => setIsOfflineModalOpen(true)}
-          onFinishJourney={handleFinishJourney}
+          onFinishJourney={handleLeaveOrEnd}
+          isHost={isHost}
+          nowMs={nowMs}
         />
       )}
 
-      {/* Offline Map Pack Download Modal (Section 12.1) */}
       {isOfflineModalOpen && (
         <OfflineMapModal
-          journeyId={journeyId}
+          journeyId={currentJourney.journeyId}
           destination={destination}
           onClose={() => setIsOfflineModalOpen(false)}
         />
       )}
 
-      {/* Emergency Assistance Sheet (Section 14.3) */}
       {isEmergencyOpen && (
         <EmergencyActionSheet
           currentLocation={
-            localParticipant ? { lat: localParticipant.lat, lng: localParticipant.lng } : null
+            tracking.selfFix ? { lat: tracking.selfFix.lat, lng: tracking.selfFix.lng } : null
           }
-          currentRoad={localParticipant?.currentRoad}
+          currentRoad={tracking.currentRoad}
           destination={destination}
-          participants={participantStates}
+          participants={participants}
           onClose={() => setIsEmergencyOpen(false)}
           onBroadcastHelpStatus={() => handleSelectStatus('NEED_HELP')}
         />
@@ -486,6 +341,54 @@ export const ActiveJourneyScreen: React.FC<ActiveJourneyScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#070b12',
+    backgroundColor: '#f8fafc',
+  },
+  backPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    elevation: 3,
+  },
+  backPillText: {
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  offlineBanner: {
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  offlineText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  warningBanner: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  warningText: {
+    color: '#92400e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  topOverlay: {
+    position: 'absolute',
+    top: 48,
+    left: 16,
+    right: 16,
+    zIndex: 30,
+    gap: 12,
   },
 });

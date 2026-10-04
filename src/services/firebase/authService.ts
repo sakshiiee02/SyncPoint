@@ -2,32 +2,23 @@ import { signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirebaseAuth } from './firebaseApp';
 
 /**
- * Handles anonymous Firebase authentication for zero-friction onboarding
- * while maintaining stable UIDs for Realtime Database security rules.
- * Matches Section 5.1 & 7.3 of Developer Handoff.
+ * Returns the persisted anonymous user, creating one only on the very first launch.
+ * `authStateReady()` matters: `currentUser` is null until the stored session is restored,
+ * and signing in before that would silently replace the user's identity.
  */
 export async function ensureAnonymousAuth(): Promise<User> {
   const auth = getFirebaseAuth();
+  await auth.authStateReady();
+  if (auth.currentUser) return auth.currentUser;
 
-  if (auth.currentUser) {
-    return auth.currentUser;
-  }
-
-  try {
-    const credential = await signInAnonymously(auth);
-    return credential.user;
-  } catch (error) {
-    console.error('[SyncPoint Auth] Failed to sign in anonymously:', error);
-    throw error;
-  }
+  const credential = await signInAnonymously(auth);
+  return credential.user;
 }
 
 export function subscribeToAuthState(callback: (user: User | null) => void): () => void {
-  const auth = getFirebaseAuth();
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(getFirebaseAuth(), callback);
 }
 
 export function getCurrentUid(): string | null {
-  const auth = getFirebaseAuth();
-  return auth.currentUser ? auth.currentUser.uid : null;
+  return getFirebaseAuth().currentUser?.uid ?? null;
 }

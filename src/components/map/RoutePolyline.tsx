@@ -8,30 +8,27 @@ export interface RoutePolylineProps {
 }
 
 /**
- * Visualizes navigation routes on the map.
- * Enforces Section 6.1: User's own route is visually primary (bold cyan #06b6d4),
- * while fellow traveler routes are subordinate (slate/indigo #6366f1 with lower opacity).
- */
+  * Visualizes navigation routes on the map.
+  * Section 6.1: User's own route is visually primary (solid Google/Apple blue #2563eb),
+  * while fellow traveler routes are subordinate (clean slate #94a3b8 with lower opacity).
+  */
 export const RoutePolyline: React.FC<RoutePolylineProps> = ({ isLocalUser }) => {
-  // In MapLibre React Native, this translates to MapLibreGL.LineLayer and ShapeSource.
-  // This presentation component provides color tokens and styling props.
   const style = isLocalUser ? styles.primaryRoute : styles.subordinateRoute;
-
   return <View style={style} />;
 };
 
 export const ROUTE_STYLES = {
   primary: {
-    lineColor: '#06b6d4',
-    lineWidth: 5.5,
-    lineOpacity: 0.95,
+    lineColor: '#2563eb',
+    lineWidth: 6.0,
+    lineOpacity: 1.0,
     lineCap: 'round' as const,
     lineJoin: 'round' as const,
   },
   subordinate: {
-    lineColor: '#818cf8',
-    lineWidth: 3.0,
-    lineOpacity: 0.55,
+    lineColor: '#94a3b8',
+    lineWidth: 3.5,
+    lineOpacity: 0.6,
     lineCap: 'round' as const,
     lineJoin: 'round' as const,
   },
@@ -39,10 +36,10 @@ export const ROUTE_STYLES = {
 
 const styles = StyleSheet.create({
   primaryRoute: {
-    borderColor: '#06b6d4',
+    borderColor: '#2563eb',
   },
   subordinateRoute: {
-    borderColor: '#818cf8',
-    opacity: 0.55,
+    borderColor: '#94a3b8',
+    opacity: 0.6,
   },
 });

@@ -12,96 +12,51 @@ import {
 import { Destination } from '@/types/journey';
 import { TravelMode, OriginLocation } from '@/types/member';
 import { useProfileStore } from '@/store/useProfileStore';
-import { useJourneyStore } from '@/store/useJourneyStore';
-import { createJourneyInDb } from '@/services/firebase/rtdbService';
+import { usePickedPlace } from '@/store/usePlacePickerStore';
+import { createJourneyAction } from '@/session/journeyActions';
+import { JourneyError } from '@/data/errors';
+import {
+  CURRENT_LOCATION_ORIGIN,
+  PickerTarget,
+  pickedToOrigin,
+  placeToDestination,
+} from '@/domain/placeMapping';
+import { PlaceField } from '@/components/common/PlaceField';
+import { ModeIcon } from '@/components/common/ModeIcon';
 
 interface CreateJourneyScreenProps {
-  onJourneyCreated: (journeyId: string, joinCode: string) => void;
+  onJourneyCreated: () => void;
+  onPickPlace: (target: PickerTarget) => void;
   onCancel: () => void;
 }
 
-// Popular sample destinations for road trips
-const PRESET_DESTINATIONS: Destination[] = [
-  {
-    displayName: 'Goa International Airport (GOI)',
-    lat: 15.3808,
-    lng: 73.8314,
-    address: 'Dabolim, Goa 403801',
-  },
-  {
-    displayName: 'Amber Palace, Jaipur',
-    lat: 26.9855,
-    lng: 75.8513,
-    address: 'Devisinghpura, Amer, Jaipur, Rajasthan',
-  },
-  {
-    displayName: 'India Gate, New Delhi',
-    lat: 28.6129,
-    lng: 77.2295,
-    address: 'Rajpath, India Gate, New Delhi',
-  },
-  {
-    displayName: 'Gateway of India, Mumbai',
-    lat: 18.9220,
-    lng: 72.8347,
-    address: 'Apollo Bandar, Colaba, Mumbai',
-  },
-];
-
-const PRESET_ORIGINS: OriginLocation[] = [
-  { displayName: 'Current GPS Location', lat: 28.6139, lng: 77.2090 },
-  { displayName: 'Delhi NCR', lat: 28.6139, lng: 77.2090 },
-  { displayName: 'Jaipur, Rajasthan', lat: 26.9124, lng: 75.7873 },
-  { displayName: 'Gwalior, MP', lat: 26.2183, lng: 78.1828 },
-  { displayName: 'Mumbai, Maharashtra', lat: 19.0760, lng: 72.8777 },
+const MODES: Array<{ mode: TravelMode; label: string }> = [
+  { mode: 'CAR', label: 'Car' },
+  { mode: 'BIKE', label: 'Bike' },
+  { mode: 'WALK', label: 'Walk' },
 ];
 
 export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
   onJourneyCreated,
+  onPickPlace,
   onCancel,
 }) => {
-  const { profile } = useProfileStore();
-  const { setActiveJoinCode } = useJourneyStore();
+  const profile = useProfileStore((s) => s.profile);
 
   const [journeyName, setJourneyName] = useState('');
-  const [selectedDestination, setSelectedDestination] = useState<Destination>(PRESET_DESTINATIONS[0]);
-  const [selectedOrigin, setSelectedOrigin] = useState<OriginLocation>(PRESET_ORIGINS[0]);
+  const [destination, setDestination] = useState<Destination | null>(null);
+  const [origin, setOrigin] = useState<OriginLocation>(CURRENT_LOCATION_ORIGIN);
   const [travelMode, setTravelMode] = useState<TravelMode>('CAR');
   const [expiryHours, setExpiryHours] = useState<number>(24);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Real Destination Search (OpenStreetMap Nominatim API)
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<Destination[]>([]);
-
-  const handleSearchDestination = async () => {
-    if (!searchQuery.trim()) return;
-    setIsSearching(true);
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          searchQuery
-        )}&limit=5`,
-        { headers: { 'User-Agent': 'SyncPoint-Production/1.0' } }
-      );
-      const data = await res.json();
-      const mapped: Destination[] = data.map((item: any) => ({
-        displayName: item.display_name.split(',')[0],
-        address: item.display_name,
-        lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon),
-      }));
-      setSearchResults(mapped);
-    } catch (e: any) {
-      Alert.alert('Search Notice', 'Could not fetch online places. You can pick from presets below.');
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  usePickedPlace('destination', (picked) => {
+    if (picked.type === 'PLACE') setDestination(placeToDestination(picked.place));
+  });
+  usePickedPlace('origin', (picked) => setOrigin(pickedToOrigin(picked)));
 
   const handleCreate = async () => {
-    if (!profile || !profile.uid) {
+    if (!profile) {
       Alert.alert('Profile Needed', 'Please complete your traveler profile before creating a journey.');
       return;
     }
@@ -109,168 +64,91 @@ export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
       Alert.alert('Name Required', 'Please enter a name for this journey (e.g. Goa Road Trip).');
       return;
     }
+    if (!destination) {
+      Alert.alert('Destination Required', 'Choose where everyone is heading.');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
-      const { journeyId, joinCode } = await createJourneyInDb(
-        {
-          uid: profile.uid,
-          name: profile.name,
-          username: profile.username,
-          phone: profile.phone,
-          photoUrl: profile.photoUrl,
-        },
-        journeyName,
-        selectedDestination,
+      await createJourneyAction({
+        name: journeyName,
+        destination,
         expiryHours,
-        selectedOrigin,
-        travelMode
-      );
-
-      setActiveJoinCode(joinCode);
+        origin,
+        travelMode,
+      });
+      onJourneyCreated();
+    } catch (error) {
+      const message =
+        error instanceof JourneyError ? error.message : 'Unable to create journey. Please try again.';
+      Alert.alert('Creation Failed', message);
+    } finally {
       setIsSubmitting(false);
-      onJourneyCreated(journeyId, joinCode);
-    } catch (error: any) {
-      setIsSubmitting(false);
-      Alert.alert('Creation Failed', error?.message || 'Unable to create journey. Please check connection.');
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
         <Text style={styles.title}>Create New Journey</Text>
         <Text style={styles.subtitle}>
-          Set one common destination for your convoy. Up to 10 friends can join with their own origins.
+          Set one common destination. Up to 10 friends can join, each from their own starting point.
         </Text>
       </View>
 
-      {/* Journey Name */}
       <View style={styles.section}>
         <Text style={styles.label}>Journey Name</Text>
         <TextInput
           style={styles.input}
-          placeholder="e.g. Goa Trip 2026"
-          placeholderTextColor="#64748b"
+          placeholder="e.g. Goa Road Trip 2026"
+          placeholderTextColor="#94a3b8"
           value={journeyName}
           onChangeText={setJourneyName}
+          maxLength={80}
         />
       </View>
 
-      {/* Destination Selection */}
       <View style={styles.section}>
-        <Text style={styles.label}>Shared Common Destination</Text>
-        <Text style={styles.helperText}>All participants will navigate toward this sync point.</Text>
-
-        {/* Live Search Bar */}
-        <View style={styles.searchBarRow}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search any city, landmark, or address..."
-            placeholderTextColor="#64748b"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={handleSearchDestination}
-          />
-          <TouchableOpacity
-            style={styles.searchButton}
-            onPress={handleSearchDestination}
-            disabled={isSearching}
-          >
-            {isSearching ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Text style={styles.searchButtonText}>Search</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Search Results */}
-        {searchResults.length > 0 && (
-          <View style={styles.resultsContainer}>
-            <Text style={styles.subLabel}>Search Results:</Text>
-            {searchResults.map((dest, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.optionCard,
-                  selectedDestination.displayName === dest.displayName && styles.optionCardSelected,
-                ]}
-                onPress={() => setSelectedDestination(dest)}
-              >
-                <Text style={styles.optionTitle}>{dest.displayName}</Text>
-                <Text style={styles.optionSubtitle}>{dest.address}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        <Text style={styles.subLabel}>Popular Presets:</Text>
-        {PRESET_DESTINATIONS.map((dest, idx) => (
-          <TouchableOpacity
-            key={idx}
-            style={[
-              styles.optionCard,
-              selectedDestination.displayName === dest.displayName && styles.optionCardSelected,
-            ]}
-            onPress={() => setSelectedDestination(dest)}
-          >
-            <Text style={styles.optionTitle}>{dest.displayName}</Text>
-            <Text style={styles.optionSubtitle}>{dest.address}</Text>
-          </TouchableOpacity>
-        ))}
+        <PlaceField
+          label="Shared destination"
+          value={destination?.displayName}
+          detail={destination?.address}
+          placeholder="Search for a city, landmark or address"
+          onPress={() => onPickPlace('destination')}
+        />
+        <Text style={styles.helperText}>Everyone navigates to this point. It can't be changed later.</Text>
       </View>
 
-      {/* Creator Origin */}
       <View style={styles.section}>
-        <Text style={styles.label}>Your Starting Point</Text>
-        <View style={styles.chipRow}>
-          {PRESET_ORIGINS.map((orig, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={[
-                styles.chip,
-                selectedOrigin.displayName === orig.displayName && styles.chipSelected,
-              ]}
-              onPress={() => setSelectedOrigin(orig)}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  selectedOrigin.displayName === orig.displayName && styles.chipTextSelected,
-                ]}
-              >
-                {orig.displayName}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <PlaceField
+          label="Your starting point"
+          value={origin.displayName}
+          detail={origin.kind === 'GPS' ? 'Taken from your GPS when you press Start' : undefined}
+          placeholder="Choose a starting point"
+          onPress={() => onPickPlace('origin')}
+        />
       </View>
 
-      {/* Travel Mode */}
       <View style={styles.section}>
         <Text style={styles.label}>Your Travel Mode</Text>
         <View style={styles.modeRow}>
-          {(['CAR', 'BIKE', 'WALK'] as TravelMode[]).map((mode) => (
-            <TouchableOpacity
-              key={mode}
-              style={[styles.modeButton, travelMode === mode && styles.modeButtonSelected]}
-              onPress={() => setTravelMode(mode)}
-            >
-              <Text
-                style={[
-                  styles.modeButtonText,
-                  travelMode === mode && styles.modeButtonTextSelected,
-                ]}
+          {MODES.map(({ mode, label }) => {
+            const selected = travelMode === mode;
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.modeButton, selected && styles.modeButtonSelected]}
+                onPress={() => setTravelMode(mode)}
               >
-                {mode === 'CAR' ? '🚗 Car' : mode === 'BIKE' ? '🏍️ Bike' : '🚶 Walk'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <ModeIcon mode={mode} selected={selected} />
+                <Text style={[styles.modeButtonText, selected && styles.modeButtonTextSelected]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
-      {/* Expiry Selector (Section 5.2 & 120) */}
       <View style={styles.section}>
         <Text style={styles.label}>Journey Expiry</Text>
         <Text style={styles.helperText}>Live location sharing automatically stops after this duration.</Text>
@@ -281,18 +159,15 @@ export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
               style={[styles.chip, expiryHours === hours && styles.chipSelected]}
               onPress={() => setExpiryHours(hours)}
             >
-              <Text style={[styles.chipText, expiryHours === hours && styles.chipTextSelected]}>
-                {hours} Hours
-              </Text>
+              <Text style={[styles.chipText, expiryHours === hours && styles.chipTextSelected]}>{hours} Hours</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      {/* Action Buttons */}
       <View style={styles.actions}>
         <TouchableOpacity
-          style={styles.submitButton}
+          style={[styles.submitButton, (!destination || isSubmitting) && styles.submitDisabled]}
           onPress={handleCreate}
           disabled={isSubmitting}
           activeOpacity={0.8}
@@ -313,186 +188,54 @@ export const CreateJourneyScreen: React.FC<CreateJourneyScreenProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    backgroundColor: '#090d16',
-    flexGrow: 1,
-  },
-  header: {
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#f8fafc',
-    marginBottom: 6,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: '#94a3b8',
-    lineHeight: 18,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#cbd5e1',
-    marginBottom: 6,
-  },
-  helperText: {
-    fontSize: 12,
-    color: '#64748b',
-    marginBottom: 8,
-  },
+  container: { padding: 20, backgroundColor: '#f8fafc', flexGrow: 1 },
+  header: { marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 6 },
+  subtitle: { fontSize: 13, color: '#64748b', lineHeight: 19 },
+  section: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '700', color: '#0f172a', marginBottom: 6 },
+  helperText: { fontSize: 12, color: '#64748b', marginTop: 6, marginBottom: 2 },
   input: {
-    backgroundColor: '#111827',
-    color: '#f8fafc',
-    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    color: '#0f172a',
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
   },
-  searchBarRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  searchInput: {
-    flex: 1,
-    backgroundColor: '#111827',
-    color: '#f8fafc',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  searchButton: {
-    backgroundColor: '#06b6d4',
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  searchButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  subLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94a3b8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  resultsContainer: {
-    marginBottom: 12,
-  },
-  optionCard: {
-    backgroundColor: '#111827',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1.5,
-    borderColor: '#1e293b',
-  },
-  optionCardSelected: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
-  },
-  optionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#f8fafc',
-    marginBottom: 2,
-  },
-  optionSubtitle: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   chip: {
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
   },
-  chipSelected: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-  },
-  chipText: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  chipTextSelected: {
-    color: '#38bdf8',
-    fontWeight: '700',
-  },
-  modeRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
+  chipSelected: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  chipText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  chipTextSelected: { color: '#2563eb', fontWeight: '700' },
+  modeRow: { flexDirection: 'row', gap: 10 },
   modeButton: {
     flex: 1,
-    backgroundColor: '#111827',
-    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    paddingVertical: 14,
     alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  modeButtonSelected: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-  },
-  modeButtonText: {
-    color: '#94a3b8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modeButtonTextSelected: {
-    color: '#38bdf8',
-    fontWeight: '700',
-  },
-  actions: {
-    marginTop: 10,
-    marginBottom: 30,
-    gap: 10,
-  },
-  submitButton: {
-    backgroundColor: '#06b6d4',
+    justifyContent: 'center',
     borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 6,
   },
-  submitButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cancelButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#64748b',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  modeButtonSelected: { borderColor: '#2563eb', backgroundColor: '#2563eb' },
+  modeButtonText: { color: '#475569', fontSize: 13, fontWeight: '700' },
+  modeButtonTextSelected: { color: '#ffffff' },
+  actions: { marginTop: 10, marginBottom: 30, gap: 10 },
+  submitButton: { backgroundColor: '#2563eb', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  submitDisabled: { opacity: 0.55 },
+  submitButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  cancelButton: { paddingVertical: 12, alignItems: 'center' },
+  cancelButtonText: { color: '#64748b', fontSize: 14, fontWeight: '600' },
 });

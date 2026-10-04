@@ -1,8 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { ensureAnonymousAuth } from '@/services/firebase/authService';
-import { useProfileStore } from '@/store/useProfileStore';
-import { useJourneyStore } from '@/store/useJourneyStore';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { Alert, Linking } from 'react-native';
+import {
+  DefaultTheme,
+  NavigationContainer,
+  createNavigationContainerRef,
+  InitialState,
+} from '@react-navigation/native';
+import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
+import { BootScreen } from '@/app/BootScreen';
+import { useBootstrap } from '@/app/useBootstrap';
+import { parseInviteCode } from '@/domain/inviteLink';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { ProfileScreen } from '@/features/profile/ProfileScreen';
 import { CreateJourneyScreen } from '@/features/journey/create/CreateJourneyScreen';
@@ -12,164 +19,244 @@ import { JourneyLobbyScreen } from '@/features/journey/lobby/JourneyLobbyScreen'
 import { ActiveJourneyScreen } from '@/features/journey/active/ActiveJourneyScreen';
 import { JourneyChatScreen } from '@/features/journey/chat/JourneyChatScreen';
 import { HistoryDetailScreen } from '@/features/journey/history/HistoryDetailScreen';
-import { JourneyMeta } from '@/types/journey';
+import { PlacePickerScreen } from '@/features/places/PlacePickerScreen';
+import { ToastHost } from '@/components/common/ToastHost';
+import { PickerTarget } from '@/domain/placeMapping';
+import { usePlacePickerStore } from '@/store/usePlacePickerStore';
+import { JourneyEndReason, useJourneyStore } from '@/store/useJourneyStore';
+import { useProfileStore } from '@/store/useProfileStore';
+import { ResumeRoute, RootStackParamList } from './routes';
 
-type ScreenName =
-  | 'Home'
-  | 'Profile'
-  | 'CreateJourney'
-  | 'JoinJourney'
-  | 'OriginTravelMode'
-  | 'JourneyLobby'
-  | 'ActiveJourney'
-  | 'JourneyChat'
-  | 'HistoryDetail';
+const Stack = createNativeStackNavigator<RootStackParamList>();
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-export const RootNavigator: React.FC = () => {
-  const [currentScreen, setCurrentScreen] = useState<ScreenName>('Home');
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
-  const [pendingJoinJourney, setPendingJoinJourney] = useState<JourneyMeta | null>(null);
-  const [selectedHistoryJourneyId, setSelectedHistoryJourneyId] = useState<string | null>(null);
+type Props<K extends keyof RootStackParamList> = NativeStackScreenProps<RootStackParamList, K>;
 
-  const { hasCompletedProfile, setUid } = useProfileStore();
-  const { currentJourney, activeJoinCode } = useJourneyStore();
+function goHome() {
+  if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: 'Home' }] });
+}
 
-  useEffect(() => {
-    async function bootstrap() {
-      try {
-        const user = await ensureAnonymousAuth();
-        if (user && user.uid) {
-          setUid(user.uid);
-        }
-      } catch (e) {
-        console.warn('[SyncPoint Boot] Anonymous auth initialization deferred:', e);
-      } finally {
-        setIsBootstrapping(false);
-      }
+function goHomeThen(route: 'JourneyLobby' | 'ActiveJourney') {
+  if (navigationRef.isReady()) {
+    navigationRef.reset({ index: 1, routes: [{ name: 'Home' }, { name: route }] });
+  }
+}
+
+/** Where "my journey" currently lives: the lobby until I press Start, the live map after. */
+function currentJourneyRoute(): 'JourneyLobby' | 'ActiveJourney' {
+  const { members } = useJourneyStore.getState();
+  const uid = useProfileStore.getState().uid;
+  const me = uid ? members[uid] : undefined;
+  return me && me.state !== 'WAITING' ? 'ActiveJourney' : 'JourneyLobby';
+}
+
+/** Opens the place picker for a destination or a starting point. */
+function openPicker(
+  navigation: { navigate: (name: 'PlacePicker', params: RootStackParamList['PlacePicker']) => void },
+  target: PickerTarget
+) {
+  navigation.navigate('PlacePicker', {
+    target,
+    title: target === 'destination' ? 'Choose destination' : 'Choose starting point',
+    allowCurrentLocation: target === 'origin',
+  });
+}
+
+// ── Route wrappers: the only place screens meet the navigation library ───────────────────
+
+const HomeRoute = ({ navigation }: Props<'Home'>) => (
+  <HomeScreen
+    onCreateJourney={() => navigation.navigate('CreateJourney')}
+    onJoinJourney={() => navigation.navigate('JoinJourney')}
+    onResumeJourney={() => navigation.navigate(currentJourneyRoute())}
+    onOpenProfile={() => navigation.navigate('Profile')}
+    onOpenHistory={(journeyId) => navigation.navigate('HistoryDetail', { journeyId })}
+  />
+);
+
+const ProfileSetupRoute = () => <ProfileScreen isFirstLaunch />;
+
+const ProfileRoute = ({ navigation }: Props<'Profile'>) => (
+  <ProfileScreen onSaved={() => navigation.goBack()} />
+);
+
+const CreateRoute = ({ navigation }: Props<'CreateJourney'>) => (
+  <CreateJourneyScreen
+    onJourneyCreated={() => goHomeThen('JourneyLobby')}
+    onPickPlace={(target) => openPicker(navigation, target)}
+    onCancel={() => navigation.goBack()}
+  />
+);
+
+const JoinRoute = ({ navigation, route }: Props<'JoinJourney'>) => (
+  <JoinJourneyScreen
+    initialCode={route.params?.code}
+    onJourneyResolved={(preview) =>
+      navigation.navigate('JourneySetup', {
+        journeyId: preview.meta.journeyId,
+        journeyName: preview.meta.name,
+        destinationName: preview.meta.destination.displayName,
+      })
     }
-    bootstrap();
-  }, [setUid]);
+    onCancel={() => navigation.goBack()}
+  />
+);
 
-  if (isBootstrapping) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#06b6d4" />
-      </View>
-    );
-  }
+const SetupRoute = ({ navigation, route }: Props<'JourneySetup'>) => (
+  <OriginTravelModeScreen
+    journeyId={route.params.journeyId}
+    journeyName={route.params.journeyName}
+    destinationName={route.params.destinationName}
+    onJoined={() => goHomeThen(currentJourneyRoute())}
+    onResumeExisting={() => goHomeThen(currentJourneyRoute())}
+    onPickPlace={(target) => openPicker(navigation, target)}
+    onCancel={() => navigation.goBack()}
+  />
+);
 
-  // Force profile creation on first launch (Section 5.1)
-  if (!hasCompletedProfile && currentScreen !== 'Profile') {
-    return <ProfileScreen isFirstLaunch onSaved={() => setCurrentScreen('Home')} />;
-  }
+const LobbyRoute = ({ navigation }: Props<'JourneyLobby'>) => (
+  <JourneyLobbyScreen
+    onStarted={() => navigation.replace('ActiveJourney')}
+    onLeft={goHome}
+    onBack={() => navigation.goBack()}
+    onPickPlace={(target) => openPicker(navigation, target)}
+  />
+);
 
-  switch (currentScreen) {
-    case 'Profile':
-      return <ProfileScreen onSaved={() => setCurrentScreen('Home')} />;
+const ActiveRoute = ({ navigation }: Props<'ActiveJourney'>) => (
+  <ActiveJourneyScreen
+    onExit={goHome}
+    onBack={() => navigation.goBack()}
+    onOpenChat={() => navigation.navigate('JourneyChat')}
+  />
+);
 
-    case 'CreateJourney':
-      return (
-        <CreateJourneyScreen
-          onJourneyCreated={(_journeyId, _joinCode) => {
-            setCurrentScreen('JourneyLobby');
-          }}
-          onCancel={() => setCurrentScreen('Home')}
-        />
-      );
-
-    case 'JoinJourney':
-      return (
-        <JoinJourneyScreen
-          onJourneyResolved={(journey, _code) => {
-            setPendingJoinJourney(journey);
-            setCurrentScreen('OriginTravelMode');
-          }}
-          onCancel={() => setCurrentScreen('Home')}
-        />
-      );
-
-    case 'OriginTravelMode':
-      if (!pendingJoinJourney) {
-        return (
-          <HomeScreen
-            onCreateJourney={() => setCurrentScreen('CreateJourney')}
-            onJoinJourney={() => setCurrentScreen('JoinJourney')}
-            onOpenJourney={() => setCurrentScreen('JourneyLobby')}
-            onOpenProfile={() => setCurrentScreen('Profile')}
-          />
-        );
-      }
-      return (
-        <OriginTravelModeScreen
-          journeyId={pendingJoinJourney.journeyId}
-          journeyName={pendingJoinJourney.name}
-          destination={pendingJoinJourney.destination}
-          onJoined={() => setCurrentScreen('JourneyLobby')}
-          onCancel={() => setCurrentScreen('Home')}
-        />
-      );
-
-    case 'JourneyLobby':
-      return (
-        <JourneyLobbyScreen
-          journeyId={currentJourney?.journeyId || ''}
-          joinCode={activeJoinCode || ''}
-          onStartTracking={() => {
-            setCurrentScreen('ActiveJourney');
-          }}
-          onLeave={() => setCurrentScreen('Home')}
-        />
-      );
-
-    case 'ActiveJourney':
-      return (
-        <ActiveJourneyScreen
-          journeyId={currentJourney?.journeyId || ''}
-          onExit={() => setCurrentScreen('Home')}
-          onOpenChat={() => setCurrentScreen('JourneyChat')}
-        />
-      );
-
-    case 'JourneyChat':
-      return (
-        <JourneyChatScreen
-          journeyId={currentJourney?.journeyId || ''}
-          journeyName={currentJourney?.name || 'Convoy'}
-          onClose={() => setCurrentScreen('ActiveJourney')}
-          onOpenEmergency={() => setCurrentScreen('ActiveJourney')}
-        />
-      );
-
-    case 'HistoryDetail':
-      return (
-        <HistoryDetailScreen
-          journeyId={selectedHistoryJourneyId || 'journey_demo_goa'}
-          onClose={() => setCurrentScreen('Home')}
-        />
-      );
-
-    case 'Home':
-    default:
-      return (
-        <HomeScreen
-          onCreateJourney={() => setCurrentScreen('CreateJourney')}
-          onJoinJourney={() => setCurrentScreen('JoinJourney')}
-          onOpenJourney={(_journeyId) => setCurrentScreen('ActiveJourney')}
-          onOpenProfile={() => setCurrentScreen('Profile')}
-          onOpenHistory={(journeyId) => {
-            setSelectedHistoryJourneyId(journeyId);
-            setCurrentScreen('HistoryDetail');
-          }}
-        />
-      );
-  }
+const ChatRoute = ({ navigation }: Props<'JourneyChat'>) => {
+  const journey = useJourneyStore((s) => s.currentJourney);
+  return (
+    <JourneyChatScreen
+      journeyId={journey?.journeyId ?? ''}
+      journeyName={journey?.name ?? 'Journey'}
+      onClose={() => navigation.goBack()}
+      onOpenEmergency={() => navigation.goBack()}
+    />
+  );
 };
 
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#090d16',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+const PlacePickerRoute = ({ navigation, route }: Props<'PlacePicker'>) => (
+  <PlacePickerScreen
+    title={route.params.title}
+    allowCurrentLocation={route.params.allowCurrentLocation}
+    onPicked={(picked) => {
+      usePlacePickerStore.getState().setPicked(route.params.target, picked);
+      navigation.goBack();
+    }}
+    onCancel={() => navigation.goBack()}
+  />
+);
+
+const HistoryRoute = ({ navigation, route }: Props<'HistoryDetail'>) => (
+  <HistoryDetailScreen journeyId={route.params.journeyId} onClose={() => navigation.goBack()} />
+);
+
+// ── App-wide watchers ────────────────────────────────────────────────────────────────────
+
+const END_MESSAGES: Record<JourneyEndReason, { title: string; message: string }> = {
+  COMPLETED: { title: 'Journey ended', message: 'This journey has ended.' },
+  CANCELLED: { title: 'Journey cancelled', message: 'The host cancelled this journey.' },
+  EXPIRED: { title: 'Journey expired', message: 'The journey reached its expiry time.' },
+  REMOVED: { title: 'Removed from journey', message: 'You are no longer part of this journey.' },
+};
+
+/** Shows one message and returns to Home whenever the journey ends for reasons outside the user's control. */
+const JourneyEndWatcher: React.FC = () => {
+  const reason = useJourneyStore((s) => s.endedReason);
+  useEffect(() => {
+    if (!reason) return;
+    const { title, message } = END_MESSAGES[reason];
+    Alert.alert(title, message);
+    useJourneyStore.getState().resetJourney();
+    goHome();
+  }, [reason]);
+  return null;
+};
+
+/** Turns syncpoint://join/CODE and https://<domain>/join/CODE links into the Join screen. */
+const InviteLinkHandler: React.FC = () => {
+  const hasProfile = useProfileStore((s) => s.hasCompletedProfile);
+  const pendingCode = useRef<string | null>(null);
+  const hasProfileRef = useRef(hasProfile);
+  hasProfileRef.current = hasProfile;
+
+  const flush = useCallback(() => {
+    if (pendingCode.current && hasProfileRef.current && navigationRef.isReady()) {
+      navigationRef.navigate('JoinJourney', { code: pendingCode.current });
+      pendingCode.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const handle = (url: string | null) => {
+      const code = url ? parseInviteCode(url) : null;
+      if (!code) return;
+      pendingCode.current = code;
+      flush();
+    };
+    Linking.getInitialURL().then(handle).catch(() => undefined);
+    const subscription = Linking.addEventListener('url', (event) => handle(event.url));
+    return () => subscription.remove();
+  }, [flush]);
+
+  // A link opened before the profile existed is delivered once the profile is saved.
+  useEffect(() => {
+    flush();
+  }, [hasProfile, flush]);
+
+  return null;
+};
+
+// ── Navigator ────────────────────────────────────────────────────────────────────────────
+
+const theme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: '#f8fafc' } };
+
+const ReadyNavigator: React.FC<{ resumeRoute: ResumeRoute | null }> = ({ resumeRoute }) => {
+  const hasCompletedProfile = useProfileStore((s) => s.hasCompletedProfile);
+
+  const initialState = useRef<InitialState | undefined>(
+    resumeRoute && hasCompletedProfile
+      ? { index: 1, routes: [{ name: 'Home' }, { name: resumeRoute }] }
+      : undefined
+  ).current;
+
+  return (
+    <NavigationContainer ref={navigationRef} theme={theme} initialState={initialState}>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {!hasCompletedProfile ? (
+          <Stack.Screen name="ProfileSetup" component={ProfileSetupRoute} />
+        ) : (
+          <>
+            <Stack.Screen name="Home" component={HomeRoute} />
+            <Stack.Screen name="Profile" component={ProfileRoute} />
+            <Stack.Screen name="CreateJourney" component={CreateRoute} />
+            <Stack.Screen name="JoinJourney" component={JoinRoute} />
+            <Stack.Screen name="JourneySetup" component={SetupRoute} />
+            <Stack.Screen name="JourneyLobby" component={LobbyRoute} />
+            <Stack.Screen name="ActiveJourney" component={ActiveRoute} />
+            <Stack.Screen name="JourneyChat" component={ChatRoute} />
+            <Stack.Screen name="HistoryDetail" component={HistoryRoute} />
+            <Stack.Screen name="PlacePicker" component={PlacePickerRoute} />
+          </>
+        )}
+      </Stack.Navigator>
+      <JourneyEndWatcher />
+      <ToastHost />
+      <InviteLinkHandler />
+    </NavigationContainer>
+  );
+};
+
+export const RootNavigator: React.FC = () => {
+  const { state, retry } = useBootstrap();
+  if (state.status !== 'ready') return <BootScreen state={state} onRetry={retry} />;
+  return <ReadyNavigator resumeRoute={state.resumeRoute} />;
+};

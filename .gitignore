@@ -39,3 +39,9 @@ firestore-debug.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# Kotlin / screenshots / backups
+android/.kotlin/
+*.tgz
+device_screenshot*.png
+*-debug.log

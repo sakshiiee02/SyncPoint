@@ -20,7 +20,14 @@ export interface RouteStep {
   maneuver: RouteManeuver;
 }
 
+/**
+ * Where a route came from. `ESTIMATE` is a straight line drawn when no routing service could be
+ * reached: it has no real roads or turns, and the UI must say so.
+ */
+export type RouteSource = 'ORS' | 'OSRM' | 'ESTIMATE';
+
 export interface RouteRecord {
+  source: RouteSource;
   routeVersion: number;
   profile: TravelMode;
   geometry: {

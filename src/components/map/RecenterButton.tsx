@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import { NavigationArrowIcon, CompassIcon } from '@/components/common/Icons';
 
 interface RecenterButtonProps {
   onRecenterSelf: () => void;
@@ -19,8 +20,8 @@ export const RecenterButton: React.FC<RecenterButtonProps> = ({
         onPress={onFitAll}
         activeOpacity={0.8}
       >
-        <Text style={styles.icon}>🌐</Text>
-        <Text style={styles.label}>Overview</Text>
+        <CompassIcon size={18} color={isOverviewMode ? '#2563eb' : '#475569'} />
+        <Text style={[styles.label, isOverviewMode && styles.activeLabel]}>Overview</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -28,8 +29,8 @@ export const RecenterButton: React.FC<RecenterButtonProps> = ({
         onPress={onRecenterSelf}
         activeOpacity={0.8}
       >
-        <Text style={styles.icon}>🎯</Text>
-        <Text style={styles.label}>Recenter</Text>
+        <NavigationArrowIcon size={18} color={!isOverviewMode ? '#2563eb' : '#475569'} />
+        <Text style={[styles.label, !isOverviewMode && styles.activeLabel]}>Recenter</Text>
       </TouchableOpacity>
     </View>
   );
@@ -44,31 +45,26 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   button: {
-    backgroundColor: 'rgba(17, 24, 39, 0.92)',
+    backgroundColor: '#ffffff',
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 24,
+    paddingHorizontal: 14,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
+    gap: 8,
   },
   activeButton: {
-    borderColor: '#06b6d4',
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-  },
-  icon: {
-    fontSize: 14,
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
   },
   label: {
-    color: '#f8fafc',
+    color: '#0f172a',
     fontSize: 12,
     fontWeight: '700',
+  },
+  activeLabel: {
+    color: '#2563eb',
   },
 });

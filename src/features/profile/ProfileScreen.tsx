@@ -47,7 +47,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
       <View style={styles.header}>
         <Text style={styles.title}>{isFirstLaunch ? 'Welcome to SyncPoint' : 'Your Traveler Profile'}</Text>
         <Text style={styles.subtitle}>
-          No passwords or email needed. Just set your travel handle and contact info for your group.
+          No passwords or email needed. Just set your travel handle and contact info for your convoy.
         </Text>
       </View>
 
@@ -56,7 +56,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
         <TextInput
           style={styles.input}
           placeholder="e.g. Shashank Verma"
-          placeholderTextColor="#64748b"
+          placeholderTextColor="#94a3b8"
           value={name}
           onChangeText={setName}
           autoCapitalize="words"
@@ -66,7 +66,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
         <TextInput
           style={styles.input}
           placeholder="e.g. shashank_v"
-          placeholderTextColor="#64748b"
+          placeholderTextColor="#94a3b8"
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
@@ -76,7 +76,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
         <TextInput
           style={styles.input}
           placeholder="+91 98765 43210"
-          placeholderTextColor="#64748b"
+          placeholderTextColor="#94a3b8"
           value={phone}
           onChangeText={setPhone}
           keyboardType="phone-pad"
@@ -102,7 +102,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onSaved, isFirstLa
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#f8fafc',
     padding: 20,
     justifyContent: 'center',
   },
@@ -111,70 +111,67 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 26,
-    fontWeight: '700',
-    color: '#f8fafc',
+    fontWeight: '800',
+    color: '#0f172a',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#64748b',
     lineHeight: 20,
   },
   card: {
-    backgroundColor: '#111827',
-    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: '#e2e8f0',
   },
   label: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#cbd5e1',
+    fontWeight: '700',
+    color: '#0f172a',
     marginBottom: 6,
     marginTop: 12,
   },
   input: {
-    backgroundColor: '#1e293b',
-    color: '#f8fafc',
-    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    color: '#0f172a',
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   disclosureBox: {
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
+    backgroundColor: '#eff6ff',
     borderLeftWidth: 3,
-    borderLeftColor: '#06b6d4',
+    borderLeftColor: '#2563eb',
     padding: 12,
     borderRadius: 8,
     marginTop: 18,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
   },
   disclosureTitle: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#38bdf8',
+    fontWeight: '800',
+    color: '#2563eb',
     marginBottom: 4,
     textTransform: 'uppercase',
   },
   disclosureText: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     lineHeight: 18,
   },
   button: {
-    backgroundColor: '#06b6d4',
-    borderRadius: 10,
-    paddingVertical: 14,
+    backgroundColor: '#2563eb',
+    borderRadius: 14,
+    paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: '#06b6d4',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   buttonText: {
     color: '#ffffff',

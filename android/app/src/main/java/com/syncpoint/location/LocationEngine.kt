@@ -7,64 +7,95 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
 /**
- * Manages raw device location updates from Fused Location or LocationManager.
- * Matches Section 8.1 of Developer Handoff.
+ * Receives device location. Prefers Google's Fused Location Provider (better accuracy and
+ * battery use) and falls back to the platform LocationManager on devices without Play Services.
+ * The sampling policy decides which fixes are worth publishing; every fix is still forwarded so
+ * the traveler's own navigation stays smooth.
  */
 class LocationEngine(
-    private val context: Context,
+    context: Context,
     private val policy: AdaptiveSamplingPolicy,
     private val onLocationEvaluated: (location: Location, shouldPublish: Boolean) -> Unit
 ) : LocationListener {
 
-    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    companion object {
+        private const val SAMPLE_INTERVAL_MS = 1000L
+        private const val MAX_USABLE_ACCURACY_M = 500f
+    }
+
+    private val appContext = context.applicationContext
+    private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private val fusedClient = LocationServices.getFusedLocationProviderClient(appContext)
+
     private var isListening = false
+    private var platformFallbackActive = false
     private var lastLocation: Location? = null
+
+    private val fusedCallback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            for (location in result.locations) handle(location)
+        }
+    }
 
     @SuppressLint("MissingPermission")
     fun startListening() {
         if (isListening) return
+        isListening = true
 
-        val hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val hasNetwork = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, SAMPLE_INTERVAL_MS)
+            .setMinUpdateIntervalMillis(SAMPLE_INTERVAL_MS)
+            .build()
+
+        try {
+            fusedClient.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper())
+                .addOnFailureListener { startPlatformUpdates() }
+        } catch (e: Exception) {
+            startPlatformUpdates()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startPlatformUpdates() {
+        if (!isListening || platformFallbackActive) return
+        platformFallbackActive = true
 
         val provider = when {
-            hasGps -> LocationManager.GPS_PROVIDER
-            hasNetwork -> LocationManager.NETWORK_PROVIDER
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
             else -> LocationManager.PASSIVE_PROVIDER
         }
-
-        // Request at highest responsiveness; AdaptiveSamplingPolicy gates network publication
-        locationManager.requestLocationUpdates(
-            provider,
-            1000L, // 1 sec minimum sample rate
-            0f,
-            this,
-            Looper.getMainLooper()
-        )
-
-        isListening = true
+        locationManager.requestLocationUpdates(provider, SAMPLE_INTERVAL_MS, 0f, this, Looper.getMainLooper())
     }
 
     fun stopListening() {
         if (!isListening) return
-        locationManager.removeUpdates(this)
         isListening = false
+        fusedClient.removeLocationUpdates(fusedCallback)
+        if (platformFallbackActive) {
+            locationManager.removeUpdates(this)
+            platformFallbackActive = false
+        }
         lastLocation = null
         policy.reset()
     }
 
-    override fun onLocationChanged(location: Location) {
-        val currentTimeMs = System.currentTimeMillis()
-        val prev = lastLocation
+    private fun handle(location: Location) {
+        if (location.hasAccuracy() && location.accuracy > MAX_USABLE_ACCURACY_M) return
 
+        val prev = lastLocation
         val distanceMovedM = if (prev != null) location.distanceTo(prev) else 0f
         val speedMps = if (location.hasSpeed()) location.speed else 0f
         val heading = if (location.hasBearing()) location.bearing else 0f
 
         val shouldPublish = policy.shouldPublish(
-            currentTimeMs = currentTimeMs,
+            currentTimeMs = System.currentTimeMillis(),
             lat = location.latitude,
             lng = location.longitude,
             speedMps = speedMps,
@@ -75,6 +106,8 @@ class LocationEngine(
         lastLocation = location
         onLocationEvaluated(location, shouldPublish)
     }
+
+    override fun onLocationChanged(location: Location) = handle(location)
 
     @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}

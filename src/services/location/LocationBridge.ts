@@ -5,9 +5,34 @@ export interface RawLocationUpdate {
   longitude: number;
   speedMps: number;
   heading: number;
+  /** Horizontal accuracy in metres. */
   accuracy: number;
   timestamp: number;
+  /** Native sampling policy's verdict: is this fix worth publishing? */
   shouldPublish: boolean;
+  /** Real device battery, 0-100. Absent if the OS didn't report one. */
+  batteryPct?: number;
+  isCharging?: boolean;
+}
+
+export interface CurrentPosition {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: number;
+  batteryPct?: number;
+  isCharging?: boolean;
+}
+
+export type NativeTrackingStatus = 'STARTED' | 'PAUSED' | 'RESUMED' | 'FINISHED';
+
+export type PositionErrorCode = 'PERMISSION_DENIED' | 'TIMEOUT' | 'UNAVAILABLE' | 'UNSUPPORTED';
+
+export class PositionError extends Error {
+  constructor(public readonly code: PositionErrorCode, message: string) {
+    super(message);
+    this.name = 'PositionError';
+  }
 }
 
 export interface TrackingState {
@@ -16,129 +41,85 @@ export interface TrackingState {
 }
 
 const { SyncPointLocationBridge } = NativeModules;
+const isAvailable = Platform.OS === 'android' && Boolean(SyncPointLocationBridge);
 
 class LocationBridgeService {
-  private eventEmitter: NativeEventEmitter | null = null;
-  private isSimulatorRunning = false;
-  private simulatorInterval: any = null;
-  private listeners: Array<(loc: RawLocationUpdate) => void> = [];
+  private eventEmitter: NativeEventEmitter | null = isAvailable
+    ? new NativeEventEmitter(SyncPointLocationBridge)
+    : null;
 
-  constructor() {
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      this.eventEmitter = new NativeEventEmitter(SyncPointLocationBridge);
-    }
-  }
-
-  /**
-   * Starts the Android Foreground Service (JourneyLocationService)
-   * Matches Section 8.2 of Developer Handoff.
-   */
+  /** Starts the Android foreground service. Call from a visible user action (Start Journey). */
   async startTracking(
     journeyId: string,
     journeyName: string,
     destinationName: string
   ): Promise<boolean> {
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      try {
-        return await SyncPointLocationBridge.startTracking(journeyId, journeyName, destinationName);
-      } catch (e) {
-        console.warn('[LocationBridge] Native start failed, falling back to simulator:', e);
-      }
-    }
-
-    // Development / Simulator fallback
-    this.isSimulatorRunning = true;
-    return true;
+    if (!isAvailable) return false;
+    return SyncPointLocationBridge.startTracking(journeyId, journeyName, destinationName);
   }
 
-  /**
-   * Pauses location tracking while leaving last known fix visible in UI.
-   */
   async pauseTracking(): Promise<boolean> {
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      try {
-        return await SyncPointLocationBridge.pauseTracking();
-      } catch (e) {
-        console.warn('[LocationBridge] Native pause failed:', e);
-      }
-    }
-    return true;
+    return isAvailable ? SyncPointLocationBridge.pauseTracking() : false;
   }
 
-  /**
-   * Resumes location tracking after being paused.
-   */
   async resumeTracking(): Promise<boolean> {
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      try {
-        return await SyncPointLocationBridge.resumeTracking();
-      } catch (e) {
-        console.warn('[LocationBridge] Native resume failed:', e);
-      }
-    }
-    return true;
+    return isAvailable ? SyncPointLocationBridge.resumeTracking() : false;
   }
 
-  /**
-   * Terminates the native foreground service and stops all sensor updates.
-   */
+  /** Stops the foreground service and all sensor updates. */
   async finishTracking(): Promise<boolean> {
-    if (this.simulatorInterval) {
-      clearInterval(this.simulatorInterval);
-      this.simulatorInterval = null;
-    }
-    this.isSimulatorRunning = false;
-
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      try {
-        return await SyncPointLocationBridge.finishTracking();
-      } catch (e) {
-        console.warn('[LocationBridge] Native finish failed:', e);
-      }
-    }
-    return true;
+    return isAvailable ? SyncPointLocationBridge.finishTracking() : false;
   }
 
-  /**
-   * Fetches the current native service state.
-   */
   async getTrackingState(): Promise<TrackingState> {
-    if (Platform.OS === 'android' && SyncPointLocationBridge) {
-      try {
-        return await SyncPointLocationBridge.getTrackingState();
-      } catch (e) {
-        console.warn('[LocationBridge] Native getTrackingState failed:', e);
-      }
+    if (!isAvailable) return { isRunning: false, isPaused: false };
+    try {
+      return await SyncPointLocationBridge.getTrackingState();
+    } catch {
+      return { isRunning: false, isPaused: false };
     }
-    return { isRunning: this.isSimulatorRunning, isPaused: false };
   }
 
-  /**
-   * Adds a listener for high-frequency location fixes from Kotlin engine.
-   */
+  /** One high-accuracy GPS fix. Throws PositionError. */
+  async getCurrentPosition(timeoutMs: number = 15000): Promise<CurrentPosition> {
+    if (!isAvailable) throw new PositionError('UNSUPPORTED', 'Location is only available on Android.');
+    try {
+      return await SyncPointLocationBridge.getCurrentPosition(timeoutMs);
+    } catch (error) {
+      const code = ((error as { code?: string })?.code ?? 'UNAVAILABLE') as PositionErrorCode;
+      throw new PositionError(code, (error as Error)?.message ?? 'Location unavailable.');
+    }
+  }
+
+  /** Speaks `text` with Android text-to-speech, interrupting anything already being said. */
+  speak(text: string): void {
+    if (isAvailable) SyncPointLocationBridge.speak(text);
+  }
+
+  stopSpeaking(): void {
+    if (isAvailable) SyncPointLocationBridge.stopSpeaking();
+  }
+
+  /** Posts an Android notification (used for journey alerts while the app is in the background). */
+  notify(title: string, message: string, urgent: boolean = false): void {
+    if (isAvailable) SyncPointLocationBridge.notify(title, message, urgent);
+  }
+
+  /** Every GPS fix from the native engine (not only the ones worth publishing). */
   addLocationListener(callback: (location: RawLocationUpdate) => void): () => void {
-    this.listeners.push(callback);
-
-    let nativeSub: any = null;
-    if (this.eventEmitter) {
-      nativeSub = this.eventEmitter.addListener('onLocationUpdate', callback);
-    }
-
-    return () => {
-      this.listeners = this.listeners.filter((cb) => cb !== callback);
-      if (nativeSub) {
-        nativeSub.remove();
-      }
-    };
+    if (!this.eventEmitter) return () => undefined;
+    const subscription = this.eventEmitter.addListener('onLocationUpdate', callback);
+    return () => subscription.remove();
   }
 
-  /**
-   * Injects a location fix (used by MovementSimulator and tests)
-   */
-  emitLocation(update: RawLocationUpdate) {
-    for (const listener of this.listeners) {
-      listener(update);
-    }
+  /** Service state changes, including Pause/Resume pressed in the notification. */
+  addStatusListener(callback: (status: NativeTrackingStatus) => void): () => void {
+    if (!this.eventEmitter) return () => undefined;
+    const subscription = this.eventEmitter.addListener(
+      'onLocationStatusChange',
+      (event: { status: NativeTrackingStatus }) => callback(event.status)
+    );
+    return () => subscription.remove();
   }
 }
 

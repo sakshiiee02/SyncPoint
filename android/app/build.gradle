@@ -3,10 +3,27 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
+    autolinkLibrariesWithApp()
 }
 
 def enableProguardInReleaseBuilds = false
 def jscFlavor = 'org.webkit:android-jsc:+'
+
+// Host for https invite links (https://<host>/join/<CODE>), read from INVITE_LINK_BASE_URL in ../.env
+def inviteHost = "invalid.syncpoint.local"
+def envFile = rootProject.file("../.env")
+if (envFile.exists()) {
+    envFile.eachLine { line ->
+        def match = (line =~ /^\s*INVITE_LINK_BASE_URL\s*=\s*(\S+)/)
+        if (match.find()) {
+            try {
+                def host = new URI(match.group(1)).host
+                if (host) inviteHost = host
+            } catch (ignored) {
+            }
+        }
+    }
+}
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -20,6 +37,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        manifestPlaceholders = [inviteHost: inviteHost]
     }
 
     signingConfigs {
@@ -29,13 +47,30 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Release signing comes from the environment / ~/.gradle/gradle.properties, never from the repo:
+        //   SYNCPOINT_KEYSTORE_FILE, SYNCPOINT_KEYSTORE_PASSWORD, SYNCPOINT_KEY_ALIAS, SYNCPOINT_KEY_PASSWORD
+        release {
+            def keystorePath = System.getenv("SYNCPOINT_KEYSTORE_FILE") ?: project.findProperty("SYNCPOINT_KEYSTORE_FILE")
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv("SYNCPOINT_KEYSTORE_PASSWORD") ?: project.findProperty("SYNCPOINT_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SYNCPOINT_KEY_ALIAS") ?: project.findProperty("SYNCPOINT_KEY_ALIAS")
+                keyPassword System.getenv("SYNCPOINT_KEY_PASSWORD") ?: project.findProperty("SYNCPOINT_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            } else {
+                // Local convenience only: a release build without a real keystore is NOT publishable.
+                logger.warn("WARNING: SYNCPOINT_KEYSTORE_FILE not set - signing release build with the debug key.")
+                signingConfig signingConfigs.debug
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -65,8 +100,6 @@ dependencies {
         implementation jscFlavor
     }
 }
-
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)
 
 // Apply Google Services plugin if google-services.json is present
 if (file('google-services.json').exists()) {

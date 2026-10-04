@@ -10,6 +10,16 @@ import {
 import { ParticipantLiveState } from '@/types/liveLocation';
 import { formatDistance, formatDuration } from '@/utils/geoMath';
 import { formatRecency, formatETA } from '@/utils/timeFormat';
+import { travelerStateLabel } from '@/domain/travelerState';
+import {
+  CloseIcon,
+  PhoneIcon,
+  CompassIcon,
+  RouteIcon,
+  ClockIcon,
+  SpeedometerIcon,
+  BatteryIcon,
+} from '@/components/common/Icons';
 
 interface TravelerDetailCardProps {
   participant: ParticipantLiveState;
@@ -29,17 +39,35 @@ export const TravelerDetailCard: React.FC<TravelerDetailCardProps> = ({
     phone,
     speedMps,
     batteryPct,
+    charging,
     currentRoad,
     distanceRemainingM,
     etaEpochMs,
     lastUpdatedAt,
     isSharing,
     isLocalUser,
+    travelerState,
+    originLabel,
   } = participant;
 
   const speedKmh = Math.round(speedMps * 3.6);
   const isMoving = speedKmh >= 3;
-  const etaSeconds = Math.max(0, Math.floor((etaEpochMs - Date.now()) / 1000));
+  const hasEta = distanceRemainingM !== null && etaEpochMs !== null;
+  const etaSeconds = etaEpochMs !== null ? Math.max(0, Math.floor((etaEpochMs - Date.now()) / 1000)) : 0;
+  const onTheRoad = travelerState === 'TRAVELING' || travelerState === 'PAUSED';
+
+  const statusLine = (() => {
+    switch (travelerState) {
+      case 'WAITING':
+        return `Not started • will leave from ${originLabel}`;
+      case 'PAUSED':
+        return lastUpdatedAt ? `Paused • last seen ${formatRecency(lastUpdatedAt)}` : 'Paused';
+      case 'TRAVELING':
+        return lastUpdatedAt ? `On the way • updated ${formatRecency(lastUpdatedAt)}` : 'On the way';
+      default:
+        return travelerStateLabel(travelerState);
+    }
+  })();
 
   const handleCall = () => {
     if (!phone) {
@@ -62,49 +90,71 @@ export const TravelerDetailCard: React.FC<TravelerDetailCardProps> = ({
           <Text style={styles.destinationSub}>Heading to: {destinationName}</Text>
         </View>
 
-        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-          <Text style={styles.closeIcon}>✕</Text>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.7}>
+          <CloseIcon size={16} color="#64748b" />
         </TouchableOpacity>
       </View>
 
-      {/* Grid of Telemetry Stats (Section 6.5) */}
+      {/* Grid of Telemetry Stats with Vector Icons (Screenshot 2) */}
       <View style={styles.statsGrid}>
         <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Distance</Text>
-          <Text style={styles.statValue}>{formatDistance(distanceRemainingM)}</Text>
+          <View style={styles.statHeaderRow}>
+            <RouteIcon size={12} color="#64748b" />
+            <Text style={styles.statLabel}>Distance</Text>
+          </View>
+          <Text style={styles.statValue}>
+            {distanceRemainingM !== null ? formatDistance(distanceRemainingM) : '--'}
+          </Text>
         </View>
 
         <View style={styles.statBox}>
-          <Text style={styles.statLabel}>ETA</Text>
-          <Text style={styles.statValue}>{formatDuration(etaSeconds)}</Text>
-          <Text style={styles.statSub}>({formatETA(etaEpochMs)})</Text>
+          <View style={styles.statHeaderRow}>
+            <ClockIcon size={12} color="#64748b" />
+            <Text style={styles.statLabel}>ETA</Text>
+          </View>
+          <Text style={styles.statValue}>
+            {hasEta && onTheRoad ? formatDuration(etaSeconds) : '--'}
+          </Text>
+          {hasEta && onTheRoad && etaEpochMs !== null && (
+            <Text style={styles.statSub}>({formatETA(etaEpochMs)})</Text>
+          )}
         </View>
 
         <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Speed</Text>
-          <Text style={styles.statValue}>{isMoving ? `${speedKmh} km/h` : 'Stopped'}</Text>
+          <View style={styles.statHeaderRow}>
+            <SpeedometerIcon size={12} color="#64748b" />
+            <Text style={styles.statLabel}>Speed</Text>
+          </View>
+          <Text style={styles.statValue}>
+            {!onTheRoad ? '--' : isMoving ? `${speedKmh} km/h` : 'Stopped'}
+          </Text>
         </View>
 
         <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Battery</Text>
-          <Text style={styles.statValue}>{batteryPct}%</Text>
+          <View style={styles.statHeaderRow}>
+            <BatteryIcon size={12} color="#64748b" />
+            <Text style={styles.statLabel}>Battery</Text>
+          </View>
+          <Text style={styles.statValue}>
+            {batteryPct !== null ? `${batteryPct}%${charging ? ' +' : ''}` : '--'}
+          </Text>
         </View>
       </View>
 
       {/* Road & Recency Info */}
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Current Road:</Text>
-        <Text style={styles.detailText}>{currentRoad || 'Corridor'}</Text>
+        <Text style={styles.detailText}>{currentRoad || '--'}</Text>
       </View>
 
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Status:</Text>
-        <Text style={[styles.detailText, !isSharing && styles.pausedText]}>
-          {!isSharing ? `PAUSED • Last seen ${formatRecency(lastUpdatedAt)}` : `Active • updated ${formatRecency(lastUpdatedAt)}`}
+        <Text style={[styles.detailText, !isSharing && onTheRoad && styles.pausedText]}>
+          {statusLine}
         </Text>
       </View>
 
-      {/* Phone Visibility & Call Action (Section 5.3, 6.5, 16.4) */}
+      {/* Phone Visibility & Call Action */}
       <View style={styles.phoneSection}>
         <View style={styles.phoneInfo}>
           <Text style={styles.phoneLabel}>Phone Number (Convoy Visible)</Text>
@@ -113,20 +163,22 @@ export const TravelerDetailCard: React.FC<TravelerDetailCardProps> = ({
 
         {!isLocalUser && (
           <TouchableOpacity style={styles.callButton} onPress={handleCall} activeOpacity={0.8}>
-            <Text style={styles.callButtonText}>📞 Call</Text>
+            <PhoneIcon size={14} color="#ffffff" />
+            <Text style={styles.callButtonText}>Call</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Secondary Route Action (Section 11.3) */}
+      {/* Secondary Route Action */}
       {!isLocalUser && (
         <TouchableOpacity
           style={styles.navigateButton}
           onPress={() => onNavigateToTraveler(participant)}
           activeOpacity={0.8}
         >
+          <CompassIcon size={16} color="#ffffff" />
           <Text style={styles.navigateButtonText}>
-            🧭 Navigate to {name.split(' ')[0]} (Secondary Route)
+            Navigate to {name.split(' ')[0]} (Secondary Route)
           </Text>
         </TouchableOpacity>
       )}
@@ -140,16 +192,11 @@ const styles = StyleSheet.create({
     bottom: 20,
     left: 16,
     right: 16,
-    backgroundColor: '#111827',
+    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 18,
-    borderWidth: 1.5,
-    borderColor: '#06b6d4',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    elevation: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     zIndex: 35,
   },
   header: {
@@ -164,25 +211,20 @@ const styles = StyleSheet.create({
   travelerName: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: '#0f172a',
     marginBottom: 2,
   },
   destinationSub: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
   },
   closeButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#1e293b',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  closeIcon: {
-    color: '#94a3b8',
-    fontSize: 14,
-    fontWeight: '700',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -191,78 +233,88 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: '#1e293b',
-    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
     padding: 8,
     alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: '#334155',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  statHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
   },
   statLabel: {
     fontSize: 10,
-    color: '#94a3b8',
-    marginBottom: 2,
-    fontWeight: '600',
+    color: '#64748b',
+    fontWeight: '700',
     textTransform: 'uppercase',
   },
   statValue: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: '#0f172a',
   },
   statSub: {
     fontSize: 9,
-    color: '#64748b',
+    color: '#94a3b8',
     marginTop: 1,
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 4,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#1e293b',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
   detailLabel: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
   },
   detailText: {
     fontSize: 12,
-    color: '#cbd5e1',
+    color: '#0f172a',
     fontWeight: '600',
   },
   pausedText: {
-    color: '#eab308',
+    color: '#b45309',
   },
   phoneSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    padding: 10,
-    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 12,
     marginTop: 12,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   phoneInfo: {
     flex: 1,
   },
   phoneLabel: {
     fontSize: 10,
-    color: '#94a3b8',
-    fontWeight: '600',
+    color: '#64748b',
+    fontWeight: '700',
   },
   phoneNumber: {
     fontSize: 14,
-    color: '#38bdf8',
+    color: '#0f172a',
     fontWeight: '700',
     marginTop: 2,
   },
   callButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#16a34a',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   callButtonText: {
     color: '#ffffff',
@@ -270,16 +322,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   navigateButton: {
-    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-    borderWidth: 1,
-    borderColor: '#06b6d4',
-    borderRadius: 10,
-    paddingVertical: 10,
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   navigateButtonText: {
-    color: '#38bdf8',
-    fontSize: 12,
+    color: '#ffffff',
+    fontSize: 13,
     fontWeight: '700',
   },
 });

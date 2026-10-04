@@ -67,17 +67,6 @@ class NotificationController(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        // Action: Finish
-        val finishIntent = Intent(context, JourneyLocationService::class.java).apply {
-            action = ACTION_FINISH
-        }
-        val finishPendingIntent = PendingIntent.getService(
-            context,
-            2,
-            finishIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
-
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, CHANNEL_ID)
         } else {
@@ -95,11 +84,6 @@ class NotificationController(private val context: Context) {
                 android.R.drawable.ic_media_pause,
                 if (isPaused) "Resume" else "Pause",
                 togglePendingIntent
-            )
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Finish",
-                finishPendingIntent
             )
 
         return builder.build()

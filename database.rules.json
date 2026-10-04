@@ -1,59 +1,140 @@
 {
   "rules": {
-    "users": {
-      "$uid": {
-        ".read": "auth != null",
-        ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.hasChildren(['uid', 'name', 'username'])"
-      }
-    },
-    "journeys": {
-      "$journeyId": {
-        ".read": "auth != null && (root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() || auth.uid === data.child('meta/creatorUid').val())",
-        "meta": {
-          ".write": "auth != null && (!data.exists() && newData.child('creatorUid').val() === auth.uid || data.child('creatorUid').val() === auth.uid)",
-          "destination": {
-            ".write": "auth != null && !data.exists() && newData.parent().child('creatorUid').val() === auth.uid"
-          }
-        },
-        "members": {
-          ".read": "auth != null && (root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() || auth.uid === root.child('journeys/' + $journeyId + '/meta/creatorUid').val())",
-          "$uid": {
-            ".write": "auth != null && ($uid === auth.uid || root.child('journeys/' + $journeyId + '/meta/creatorUid').val() === auth.uid)"
-          }
-        },
-        "live": {
-          "$uid": {
-            ".write": "auth != null && $uid === auth.uid && root.child('journeys/' + $journeyId + '/meta/status').val() === 'ACTIVE' && root.child('journeys/' + $journeyId + '/meta/expiresAt').val() > now"
-          }
-        },
-        "routes": {
-          "$uid": {
-            ".write": "auth != null && $uid === auth.uid"
-          }
-        },
-        "chat": {
-          "$messageId": {
-            ".write": "auth != null && root.child('journeys/' + $journeyId + '/members/' + auth.uid).exists() && (!data.exists() && newData.child('senderUid').val() === auth.uid)"
-          }
-        },
-        "history": {
-          "$uid": {
-            ".write": "auth != null && $uid === auth.uid"
-          }
-        }
-      }
-    },
+    ".read": false,
+    ".write": false,
+
     "joinCodes": {
       "$code": {
         ".read": "auth != null",
-        ".write": false
+        ".write": "auth != null && ((newData.exists() && (!data.exists() || data.child('expiresAt').val() < now) && newData.parent().parent().child('journeys').child(newData.child('journeyId').val()).child('meta').child('creatorUid').val() === auth.uid) || (!newData.exists() && data.exists() && root.child('journeys').child(data.child('journeyId').val()).child('meta').child('creatorUid').val() === auth.uid))",
+        ".validate": "newData.hasChildren(['journeyId', 'expiresAt']) && $code.matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/)",
+        "journeyId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+        "expiresAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
       }
     },
-    "activeJourneyByUser": {
+
+    "userJourney": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".write": "auth != null && auth.uid === $uid && (!newData.exists() || !data.exists() || data.child('journeyId').val() === newData.child('journeyId').val() || data.child('expiresAt').val() < now || !root.child('journeys').child(data.child('journeyId').val()).child('meta').exists() || root.child('journeys').child(data.child('journeyId').val()).child('meta').child('status').val() === 'COMPLETED' || root.child('journeys').child(data.child('journeyId').val()).child('meta').child('status').val() === 'CANCELLED' || root.child('journeys').child(data.child('journeyId').val()).child('meta').child('status').val() === 'EXPIRED' || !root.child('journeys').child(data.child('journeyId').val()).child('members').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['journeyId', 'joinedAt', 'expiresAt'])",
+        "journeyId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+        "joinedAt": { ".validate": "newData.isNumber()" },
+        "expiresAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "journeys": {
+      "$journeyId": {
+
+        "meta": {
+          ".read": "auth != null",
+          ".write": "auth != null && !data.exists() && newData.child('creatorUid').val() === auth.uid && newData.parent().child('members').child(auth.uid).exists() && newData.child('expiresAt').val() > now && newData.child('expiresAt').val() <= now + 1209600000",
+          ".validate": "newData.hasChildren(['journeyId', 'name', 'status', 'creatorUid', 'createdAt', 'expiresAt', 'destination', 'schemaVersion', 'joinCode'])",
+          "journeyId": { ".validate": "newData.val() === $journeyId" },
+          "joinCode": { ".validate": "newData.isString() && newData.val().matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/)" },
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "status": {
+            ".write": "auth != null && data.exists() && (data.val() === 'LOBBY' || data.val() === 'ACTIVE') && ((data.parent().child('creatorUid').val() === auth.uid && (newData.val() === 'COMPLETED' || newData.val() === 'CANCELLED')) || (root.child('journeys').child($journeyId).child('members').child(auth.uid).exists() && (newData.val() === data.val() || (data.val() === 'LOBBY' && newData.val() === 'ACTIVE' && newData.parent().parent().child('members').child(auth.uid).child('state').val() === 'TRAVELING') || (now >= data.parent().child('expiresAt').val() && newData.val() === 'EXPIRED') || (newData.val() === 'COMPLETED' && newData.parent().parent().child('members').child(auth.uid).child('state').val() === 'FINISHED'))))",
+            ".validate": "(newData.val() === 'LOBBY' || newData.val() === 'ACTIVE' || newData.val() === 'COMPLETED' || newData.val() === 'EXPIRED' || newData.val() === 'CANCELLED') && (data.exists() || newData.val() === 'LOBBY')"
+          },
+          "creatorUid": {
+            ".write": "auth != null && data.exists() && data.val() === auth.uid && newData.exists() && newData.parent().parent().child('members').child(newData.val()).exists()",
+            ".validate": "newData.isString()"
+          },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "startedAt": {
+            ".write": "auth != null && !data.exists() && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists()",
+            ".validate": "newData.isNumber()"
+          },
+          "expiresAt": { ".validate": "newData.isNumber()" },
+          "schemaVersion": { ".validate": "newData.val() === 2" },
+          "destination": {
+            ".validate": "newData.hasChildren(['lat', 'lng', 'displayName'])",
+            "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+            "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+            "placeId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "displayName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 160" },
+            "address": { ".validate": "newData.isString() && newData.val().length <= 400" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
+        },
+
+        "seats": {
+          ".read": "auth != null",
+          "$seat": {
+            ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid && newData.parent().parent().child('members').child(auth.uid).child('seat').val() === $seat && (newData.parent().parent().child('meta').child('status').val() === 'LOBBY' || newData.parent().parent().child('meta').child('status').val() === 'ACTIVE') && newData.parent().parent().child('meta').child('expiresAt').val() > now) || (data.exists() && !newData.exists() && (data.val() === auth.uid || data.parent().parent().child('meta').child('creatorUid').val() === auth.uid)))",
+            ".validate": "newData.isString() && $seat.matches(/^[0-9]$/)"
+          }
+        },
+
+        "members": {
+          ".read": "auth != null && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists()",
+          "$uid": {
+            ".write": "auth != null && ((auth.uid === $uid && (!newData.exists() || newData.parent().parent().child('seats').child(newData.child('seat').val()).val() === auth.uid)) || (!newData.exists() && data.exists() && data.parent().parent().child('meta').child('creatorUid').val() === auth.uid))",
+            ".validate": "newData.hasChildren(['uid', 'name', 'username', 'seat', 'origin', 'travelMode', 'state', 'joinedAt']) && newData.child('uid').val() === $uid && (!data.exists() ? newData.child('state').val() === 'WAITING' : (newData.child('seat').val() === data.child('seat').val() && newData.child('joinedAt').val() === data.child('joinedAt').val() && (newData.child('state').val() === data.child('state').val() || (data.child('state').val() === 'WAITING' && newData.child('state').val() === 'TRAVELING') || (data.child('state').val() === 'TRAVELING' && (newData.child('state').val() === 'PAUSED' || newData.child('state').val() === 'ARRIVED' || newData.child('state').val() === 'FINISHED')) || (data.child('state').val() === 'PAUSED' && (newData.child('state').val() === 'TRAVELING' || newData.child('state').val() === 'ARRIVED' || newData.child('state').val() === 'FINISHED')) || (data.child('state').val() === 'ARRIVED' && newData.child('state').val() === 'FINISHED')) && (data.child('state').val() === 'WAITING' || (newData.child('travelMode').val() === data.child('travelMode').val() && newData.child('origin').child('kind').val() === data.child('origin').child('kind').val() && newData.child('origin').child('lat').val() === data.child('origin').child('lat').val() && newData.child('origin').child('lng').val() === data.child('origin').child('lng').val()))))",
+            "uid": { ".validate": "newData.isString()" },
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+            "username": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" },
+            "phone": { ".validate": "newData.isString() && newData.val().length <= 24" },
+            "photoUrl": { ".validate": "newData.isString() && newData.val().length <= 2000" },
+            "seat": { ".validate": "newData.isString() && newData.val().matches(/^[0-9]$/)" },
+            "origin": {
+              ".validate": "newData.hasChildren(['kind', 'displayName'])",
+              "kind": { ".validate": "newData.val() === 'GPS' || newData.val() === 'PLACE' || newData.val() === 'MAP'" },
+              "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+              "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+              "displayName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 160" },
+              "$other": { ".validate": false }
+            },
+            "travelMode": { ".validate": "newData.val() === 'CAR' || newData.val() === 'BIKE' || newData.val() === 'WALK'" },
+            "state": { ".validate": "newData.val() === 'WAITING' || newData.val() === 'TRAVELING' || newData.val() === 'PAUSED' || newData.val() === 'ARRIVED' || newData.val() === 'FINISHED'" },
+            "joinedAt": { ".validate": "newData.isNumber()" },
+            "startedAt": { ".validate": "newData.isNumber()" },
+            "finishedAt": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+
+        "live": {
+          ".read": "auth != null && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists()",
+          "$uid": {
+            ".write": "auth != null && ((!newData.exists() && (auth.uid === $uid || root.child('journeys').child($journeyId).child('meta').child('creatorUid').val() === auth.uid)) || (newData.exists() && auth.uid === $uid && root.child('journeys').child($journeyId).child('meta').child('status').val() === 'ACTIVE' && root.child('journeys').child($journeyId).child('meta').child('expiresAt').val() > now && (root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'TRAVELING' || root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'PAUSED' || root.child('journeys').child($journeyId).child('members').child(auth.uid).child('state').val() === 'ARRIVED')))",
+            ".validate": "newData.hasChildren(['lat', 'lng', 'lastUpdatedAt'])",
+            "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+            "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+            "heading": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 360" },
+            "speedMps": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 150" },
+            "batteryPct": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+            "charging": { ".validate": "newData.isBoolean()" },
+            "status": { ".validate": "newData.isString() && newData.val().length <= 24" },
+            "lastUpdatedAt": { ".validate": "newData.isNumber()" },
+            "currentRoad": { ".validate": "newData.isString() && newData.val().length <= 160" },
+            "distanceRemainingM": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "etaEpochMs": { ".validate": "newData.isNumber()" },
+            "routeVersion": { ".validate": "newData.isNumber()" },
+            "isSharing": { ".validate": "newData.isBoolean()" },
+            "$other": { ".validate": false }
+          }
+        },
+
+        "chat": {
+          ".read": "auth != null && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists()",
+          "$msgId": {
+            ".write": "auth != null && !data.exists() && newData.exists() && newData.child('senderUid').val() === auth.uid && root.child('journeys').child($journeyId).child('members').child(auth.uid).exists() && (root.child('journeys').child($journeyId).child('meta').child('status').val() === 'LOBBY' || root.child('journeys').child($journeyId).child('meta').child('status').val() === 'ACTIVE')",
+            ".validate": "newData.hasChildren(['id', 'senderUid', 'senderName', 'text', 'timestamp', 'type'])",
+            "id": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "senderUid": { ".validate": "newData.isString()" },
+            "senderName": { ".validate": "newData.isString() && newData.val().length <= 60" },
+            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 500" },
+            "timestamp": { ".validate": "newData.isNumber()" },
+            "type": { ".validate": "newData.val() === 'TEXT' || newData.val() === 'STATUS' || newData.val() === 'EMERGENCY'" },
+            "$other": { ".validate": false }
+          }
+        }
       }
     }
   }

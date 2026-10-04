@@ -23,6 +23,8 @@ export const CONFIG = {
 
   // Arrival detection geofence radius (in meters)
   ARRIVAL_RADIUS_M: 120,
+  // Arrival radius by travel mode: a walker has to be much closer than a car.
+  ARRIVAL_RADIUS_BY_MODE: { CAR: 120, BIKE: 80, WALK: 50 },
 
   // Off-route reroute threshold (in meters)
   ROUTE_REROUTE_THRESHOLD_M: 75,
@@ -40,12 +42,26 @@ export const CONFIG = {
     MIN_ZOOM: 3,
     MAX_ZOOM: 19,
     PADDING_PX: 60,
-    TILE_URL: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    TILE_URL: 'https://tiles.openfreemap.org/styles/bright',
   },
 
-  // Routing
+  // Routing (OpenRouteService primary, public OSRM as a free fallback)
   ROUTING: {
-    DEFAULT_OSRM_URL: 'https://router.project-osrm.org',
-    TIMEOUT_MS: 8000,
+    ORS_BASE_URL: 'https://api.openrouteservice.org',
+    OSRM_BASE_URLS: {
+      CAR: 'https://routing.openstreetmap.de/routed-car',
+      BIKE: 'https://routing.openstreetmap.de/routed-bike',
+      WALK: 'https://routing.openstreetmap.de/routed-foot',
+    },
+    TIMEOUT_MS: 12000,
+    ROUTE_CACHE_TTL_MS: 30 * 60 * 1000,
+  },
+
+  // Free-tier rationing per device per day (providers' real limits are higher and shared by all users).
+  DAILY_QUOTA: {
+    geoapify: 2400,
+    locationiq: 4000,
+    ors: 1200,
+    osrm: 3000,
   },
 } as const;

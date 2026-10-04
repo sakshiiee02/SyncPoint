@@ -1,68 +1,66 @@
-/**
- * Voice Navigation Guidance Service
- * Matches Section 11.2 of Developer Handoff: "Voice guidance through Android Text-to-Speech in V1."
- */
-class VoiceGuidanceService {
-  private isEnabled: boolean = true;
-  private lastSpokenStepIndex: number = -1;
-  private lastSpokenDistanceTier: string = '';
+import { LocationBridge } from '@/services/location/LocationBridge';
 
-  enableVoice() {
+/**
+ * Turn-by-turn voice prompts through Android text-to-speech (native). Each manoeuvre is announced
+ * once per distance tier ("in 800 m", "in 200 m", "now") so the driver isn't nagged.
+ */
+type Tier = 'FAR' | 'CLOSE' | 'IMMEDIATE';
+
+export class VoiceGuidanceService {
+  private isEnabled = true;
+  private lastStepIndex = -1;
+  private spokenTiers = new Set<Tier>();
+
+  constructor(private readonly speakFn: (text: string) => void = (t) => LocationBridge.speak(t)) {}
+
+  enableVoice(): void {
     this.isEnabled = true;
   }
 
-  disableVoice() {
+  disableVoice(): void {
     this.isEnabled = false;
+    LocationBridge.stopSpeaking();
   }
 
-  speak(text: string) {
+  get enabled(): boolean {
+    return this.isEnabled;
+  }
+
+  speak(text: string): void {
+    if (this.isEnabled) this.speakFn(text);
+  }
+
+  /** Decides whether to say something for the current distance to the next manoeuvre. */
+  evaluateManeuverPrompt(stepIndex: number, distanceM: number, instruction: string): void {
     if (!this.isEnabled) return;
 
-    // In web / React Native with SpeechSynthesis or react-native-tts:
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      window.speechSynthesis.speak(utterance);
-    } else {
-      console.log(`[SyncPoint Voice Guidance] "${text}"`);
+    if (stepIndex !== this.lastStepIndex) {
+      this.lastStepIndex = stepIndex;
+      this.spokenTiers.clear();
     }
-  }
 
-  /**
-   * Evaluates distance to next maneuver and dispatches staggered voice prompts.
-   */
-  evaluateManeuverPrompt(
-    stepIndex: number,
-    distanceM: number,
-    instruction: string
-  ) {
-    if (!this.isEnabled) return;
-
-    let tier = '';
+    let tier: Tier | null = null;
     let prompt = '';
-
     if (distanceM <= 50) {
       tier = 'IMMEDIATE';
       prompt = instruction;
     } else if (distanceM <= 250) {
       tier = 'CLOSE';
-      prompt = `In 200 meters, ${instruction.toLowerCase()}`;
+      prompt = `In ${Math.round(distanceM / 50) * 50} metres, ${instruction}`;
     } else if (distanceM <= 800) {
       tier = 'FAR';
-      prompt = `In 800 meters, ${instruction.toLowerCase()}`;
+      prompt = `In ${Math.round(distanceM / 100) * 100} metres, ${instruction}`;
     }
 
-    if (tier && (this.lastSpokenStepIndex !== stepIndex || this.lastSpokenDistanceTier !== tier)) {
-      this.lastSpokenStepIndex = stepIndex;
-      this.lastSpokenDistanceTier = tier;
-      this.speak(prompt);
+    if (tier && !this.spokenTiers.has(tier)) {
+      this.spokenTiers.add(tier);
+      this.speakFn(prompt);
     }
   }
 
-  reset() {
-    this.lastSpokenStepIndex = -1;
-    this.lastSpokenDistanceTier = '';
+  reset(): void {
+    this.lastStepIndex = -1;
+    this.spokenTiers.clear();
   }
 }
 

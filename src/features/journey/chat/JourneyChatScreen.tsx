@@ -16,12 +16,24 @@ import { useProfileStore } from '@/store/useProfileStore';
 import {
   sendChatMessage,
   subscribeToChatMessages,
+  getPendingChat,
+  flushChatOutbox,
 } from '@/services/firebase/chatService';
 import {
   broadcastQuickStatus,
   QUICK_STATUS_LABELS,
 } from '@/services/firebase/statusService';
 import { formatRecency } from '@/utils/timeFormat';
+import { trackingController } from '@/tracking/trackingController';
+import {
+  CloseIcon,
+  SendIcon,
+  GasPumpIcon,
+  RestaurantIcon,
+  CoffeeIcon,
+  TrafficIcon,
+  AlertTriangleIcon,
+} from '@/components/common/Icons';
 
 interface JourneyChatScreenProps {
   journeyId: string;
@@ -46,12 +58,25 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
 }) => {
   const { profile } = useProfileStore();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pending, setPending] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
+
+  // Messages typed while offline stay visible (marked "sending") until the server has them.
+  useEffect(() => {
+    getPendingChat(journeyId).then(setPending);
+    flushChatOutbox(journeyId).catch(() => undefined);
+  }, [journeyId]);
+
+  const shown = [...messages, ...pending.filter((p) => !messages.some((m) => m.id === p.id))].sort(
+    (a, b) => a.timestamp - b.timestamp
+  );
+  const pendingIds = new Set(pending.map((p) => p.id));
 
   useEffect(() => {
     const unsubscribe = subscribeToChatMessages(journeyId, (msgs) => {
       setMessages(msgs);
+      setPending((current) => current.filter((p) => !msgs.some((m) => m.id === p.id)));
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
 
@@ -64,12 +89,13 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
     setInputText('');
 
     try {
-      await sendChatMessage(
+      const result = await sendChatMessage(
         journeyId,
         { uid: profile.uid, name: profile.name || 'Traveler' },
         text,
         'TEXT'
       );
+      if (result.queued) setPending((current) => [...current, result.message]);
     } catch (e: any) {
       console.warn('Failed to send message:', e.message);
     }
@@ -83,6 +109,7 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
     }
 
     try {
+      await trackingController.setStatus(status);
       await broadcastQuickStatus(
         journeyId,
         { uid: profile.uid, name: profile.name || 'Traveler' },
@@ -90,6 +117,24 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
       );
     } catch (e: any) {
       console.warn('Failed to broadcast status:', e.message);
+    }
+  };
+
+  const renderShortcutIcon = (st: QuickStatusType) => {
+    const color = st === 'NEED_HELP' ? '#dc2626' : '#475569';
+    switch (st) {
+      case 'FUEL_STOP':
+        return <GasPumpIcon size={13} color={color} />;
+      case 'FOOD_STOP':
+        return <RestaurantIcon size={13} color={color} />;
+      case 'BREAK':
+        return <CoffeeIcon size={13} color={color} />;
+      case 'TRAFFIC':
+        return <TrafficIcon size={13} color={color} />;
+      case 'NEED_HELP':
+        return <AlertTriangleIcon size={13} color={color} />;
+      default:
+        return null;
     }
   };
 
@@ -116,7 +161,7 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
             {item.text}
           </Text>
           <Text style={[styles.messageTime, isMe ? styles.myMessageTime : styles.otherMessageTime]}>
-            {formatRecency(item.timestamp)}
+            {pendingIds.has(item.id) ? 'Sending...' : formatRecency(item.timestamp)}
           </Text>
         </View>
       </View>
@@ -135,21 +180,21 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
             <Text style={styles.headerTitle}>{journeyName} Chat</Text>
             <Text style={styles.headerSub}>Convoy coordination • Visible to members only</Text>
           </View>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>✕</Text>
+          <TouchableOpacity onPress={onClose} style={styles.closeButton} activeOpacity={0.7}>
+            <CloseIcon size={18} color="#64748b" />
           </TouchableOpacity>
         </View>
 
         {/* Message List */}
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={shown}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
         />
 
-        {/* Quick Status Chips Bar (Section 14.1 & 14.2) */}
+        {/* Quick Status Chips Bar (Zero Emojis, Pure SVG Vector Icons) */}
         <View style={styles.shortcutsBar}>
           {CHAT_STATUS_SHORTCUTS.map((status) => {
             const meta = QUICK_STATUS_LABELS[status];
@@ -162,8 +207,9 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
                 onPress={() => handleQuickStatus(status)}
                 activeOpacity={0.8}
               >
+                {renderShortcutIcon(status)}
                 <Text style={[styles.shortcutText, isHelp && styles.helpText]}>
-                  {meta.icon} {meta.label}
+                  {meta.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -175,7 +221,7 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
           <TextInput
             style={styles.textInput}
             placeholder="Type a message to the convoy..."
-            placeholderTextColor="#64748b"
+            placeholderTextColor="#94a3b8"
             value={inputText}
             onChangeText={setInputText}
           />
@@ -184,7 +230,7 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
             onPress={handleSend}
             disabled={!inputText.trim()}
           >
-            <Text style={styles.sendButtonText}>Send</Text>
+            <SendIcon size={18} color="#ffffff" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -195,10 +241,11 @@ export const JourneyChatScreen: React.FC<JourneyChatScreenProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#090d16',
+    backgroundColor: '#ffffff',
   },
   container: {
     flex: 1,
+    backgroundColor: '#f8fafc',
   },
   header: {
     flexDirection: 'row',
@@ -207,26 +254,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    backgroundColor: '#0f172a',
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#f8fafc',
+    color: '#0f172a',
   },
   headerSub: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: 12,
+    color: '#64748b',
     marginTop: 2,
   },
   closeButton: {
-    padding: 8,
-  },
-  closeText: {
-    color: '#94a3b8',
-    fontSize: 16,
-    fontWeight: '700',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listContent: {
     padding: 16,
@@ -244,35 +291,35 @@ const styles = StyleSheet.create({
   },
   bubble: {
     maxWidth: '78%',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   myBubble: {
-    backgroundColor: '#06b6d4',
-    borderBottomRightRadius: 2,
+    backgroundColor: '#2563eb',
+    borderBottomRightRadius: 4,
   },
   otherBubble: {
-    backgroundColor: '#1e293b',
-    borderBottomLeftRadius: 2,
+    backgroundColor: '#ffffff',
+    borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   senderName: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#38bdf8',
+    color: '#2563eb',
     marginBottom: 2,
   },
   messageText: {
     fontSize: 14,
-    lineHeight: 19,
+    lineHeight: 20,
   },
   myMessageText: {
     color: '#ffffff',
   },
   otherMessageText: {
-    color: '#f8fafc',
+    color: '#0f172a',
   },
   messageTime: {
     fontSize: 10,
@@ -280,93 +327,95 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   myMessageTime: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255, 255, 255, 0.75)',
   },
   otherMessageTime: {
-    color: '#64748b',
+    color: '#94a3b8',
   },
   statusBubble: {
     alignSelf: 'center',
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
-    paddingHorizontal: 12,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
     marginVertical: 8,
     borderWidth: 1,
-    borderColor: 'rgba(6, 182, 212, 0.3)',
+    borderColor: '#bfdbfe',
     alignItems: 'center',
   },
   statusBubbleText: {
-    color: '#38bdf8',
+    color: '#2563eb',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   statusTime: {
     color: '#64748b',
-    fontSize: 9,
+    fontSize: 10,
     marginTop: 2,
   },
   shortcutsBar: {
     flexDirection: 'row',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#0f172a',
-    gap: 6,
+    paddingVertical: 8,
+    backgroundColor: '#ffffff',
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    gap: 8,
     overflow: 'hidden',
   },
   shortcutChip: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#f8fafc',
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 14,
-    borderWidth: 0.5,
-    borderColor: '#334155',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   shortcutText: {
-    color: '#cbd5e1',
+    color: '#334155',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   helpChip: {
-    borderColor: '#ef4444',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderColor: '#fca5a5',
+    backgroundColor: '#fef2f2',
   },
   helpText: {
-    color: '#f87171',
+    color: '#dc2626',
   },
   inputBar: {
     flexDirection: 'row',
-    padding: 10,
-    backgroundColor: '#0f172a',
+    padding: 12,
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    borderTopColor: '#e2e8f0',
     gap: 8,
+    alignItems: 'center',
   },
   textInput: {
     flex: 1,
-    backgroundColor: '#1e293b',
-    color: '#f8fafc',
+    backgroundColor: '#f8fafc',
+    color: '#0f172a',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   sendButton: {
-    backgroundColor: '#06b6d4',
-    paddingHorizontal: 18,
+    backgroundColor: '#2563eb',
+    width: 40,
+    height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#94a3b8',
     opacity: 0.5,
-  },
-  sendButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
   },
 });
